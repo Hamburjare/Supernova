@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "0E/0TJkHM5Q=",
+  "dgSpecHash": "sItTY5T6sos=",
   "success": true,
-  "projectFilePath": "A:\\Code\\Supernova\\supernova.csproj",
+  "projectFilePath": "A:\\Code\\Supernova\\Supernova.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\kelts\\.nuget\\packages\\googlegson\\2.13.1.1\\googlegson.2.13.1.1.nupkg.sha512",
     "C:\\Users\\kelts\\.nuget\\packages\\microsoft.extensions.configuration\\10.0.0\\microsoft.extensions.configuration.10.0.0.nupkg.sha512",

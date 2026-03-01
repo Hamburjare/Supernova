@@ -1,4 +1,8 @@
 {
+  "dev": {
+    "run": "dotnet run"
+  },
   "module-path": "./spacetimedb",
-  "server": "self-hosted"
+  "server": "self-hosted",
+  "database": "supernova"
 }

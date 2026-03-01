@@ -2,6 +2,31 @@ using SpacetimeDB;
 
 public static partial class Module
 {
+    private static readonly string[] AllowedIssuers =
+    {
+        // Example: "https://your-tenant.us.auth0.com/"
+    };
+
+    private static readonly string[] AllowedAudiences =
+    {
+        // Example: "your_auth0_client_id"
+    };
+
+    private static void EnsureAuthorized(ReducerContext ctx)
+    {
+        var jwt = ctx.SenderAuth.Jwt ?? throw new Exception("Unauthorized: JWT is required");
+
+        if (AllowedIssuers.Length > 0 && !AllowedIssuers.Contains(jwt.Issuer, StringComparer.Ordinal))
+        {
+            throw new Exception($"Unauthorized: invalid issuer {jwt.Issuer}");
+        }
+
+        if (AllowedAudiences.Length > 0 && !AllowedAudiences.Any(aud => jwt.Audience.Contains(aud, StringComparer.Ordinal)))
+        {
+            throw new Exception("Unauthorized: invalid audience");
+        }
+    }
+
     [Table(Accessor = "User", Public = true)]
     public partial class User
     {
@@ -22,6 +47,7 @@ public static partial class Module
     [Reducer]
     public static void SetName(ReducerContext ctx, string name)
     {
+        EnsureAuthorized(ctx);
         name = ValidateName(name);
 
         if (ctx.Db.User.Identity.Find(ctx.Sender) is User user)
@@ -43,6 +69,7 @@ public static partial class Module
     [Reducer]
     public static void SendMessage(ReducerContext ctx, string text)
     {
+        EnsureAuthorized(ctx);
         text = ValidateMessage(text);
         Log.Info(text);
         ctx.Db.Message.Insert(
@@ -67,6 +94,7 @@ public static partial class Module
     [Reducer(ReducerKind.ClientConnected)]
     public static void ClientConnected(ReducerContext ctx)
     {
+        EnsureAuthorized(ctx);
         Log.Info($"Connect {ctx.Sender}");
 
         if (ctx.Db.User.Identity.Find(ctx.Sender) is User user)

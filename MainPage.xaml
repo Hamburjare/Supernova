@@ -4,73 +4,152 @@
              x:Class="Supernova.MainPage"
              Title="Supernova">
 
-    <Grid RowDefinitions="Auto,*" Padding="12" RowSpacing="12">
-        <Border Grid.Row="0" StrokeShape="RoundRectangle 10" Padding="10">
-            <VerticalStackLayout Spacing="8">
+    <Grid Padding="12">
+        <Border StrokeShape="RoundRectangle 10"
+                Padding="18"
+                VerticalOptions="Center"
+                HorizontalOptions="Center"
+                MaximumWidthRequest="520"
+                IsVisible="{Binding IsLoginViewVisible}">
+            <VerticalStackLayout Spacing="12">
                 <Label Text="Supernova"
                        FontAttributes="Bold"
-                       FontSize="20" />
-
+                       FontSize="26" />
+                <Label Text="Sign in to start chatting."
+                       FontSize="14" />
+                <Label Text="{Binding AuthStateText}" />
                 <Label Text="{Binding StatusText}" />
-
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                    <Entry Grid.Column="0"
-                           Placeholder="Set your display name"
-                           Text="{Binding PendingName}"
-                           Completed="OnSetNameCompleted" />
-                    <Button Grid.Column="1"
-                            Text="Set Name"
-                            Clicked="OnSetNameClicked" />
-                </Grid>
+                <Button Text="Sign In"
+                        Clicked="OnSignInClicked" />
             </VerticalStackLayout>
         </Border>
 
-        <Grid Grid.Row="1" ColumnDefinitions="220,*" ColumnSpacing="12">
-            <Border Grid.Column="0" StrokeShape="RoundRectangle 10" Padding="10">
-                <VerticalStackLayout Spacing="8">
-                    <Label Text="Users"
-                           FontSize="16"
-                           FontAttributes="Bold" />
+        <Grid IsVisible="{Binding IsChatViewVisible}"
+              RowDefinitions="Auto,*"
+              RowSpacing="12">
+            <Border Grid.Row="0"
+                    StrokeShape="RoundRectangle 10"
+                    Padding="10">
+                <Grid ColumnDefinitions="*,Auto,Auto"
+                      ColumnSpacing="8">
+                    <VerticalStackLayout Grid.Column="0"
+                                         Spacing="4">
+                        <Label Text="Supernova"
+                               FontAttributes="Bold"
+                               FontSize="20" />
+                        <Label Text="{Binding StatusText}" />
+                    </VerticalStackLayout>
 
-                    <CollectionView ItemsSource="{Binding Users}">
-                        <CollectionView.ItemTemplate>
-                            <DataTemplate>
-                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Padding="4,2">
-                                    <Label Grid.Column="0"
-                                         Text="{Binding PresenceIcon}" />
-                                    <Label Grid.Column="1"
-                                           Text="{Binding DisplayName}" />
-                                </Grid>
-                            </DataTemplate>
-                        </CollectionView.ItemTemplate>
-                    </CollectionView>
-                </VerticalStackLayout>
+                    <Button Grid.Column="1"
+                            Text="Settings"
+                            Clicked="OnToggleSettingsClicked" />
+
+                    <Button Grid.Column="2"
+                            Text="Sign Out"
+                            Clicked="OnSignOutClicked" />
+                </Grid>
             </Border>
 
-            <Border Grid.Column="1" StrokeShape="RoundRectangle 10" Padding="10">
-                <Grid RowDefinitions="*,Auto" RowSpacing="8">
-                    <CollectionView x:Name="MessagesList"
-                                    Grid.Row="0"
-                                    ItemsSource="{Binding Messages}">
-                        <CollectionView.ItemTemplate>
-                            <DataTemplate>
-                                <Grid RowDefinitions="Auto,Auto" Padding="4,6">
-                                    <HorizontalStackLayout Spacing="8">
-                                        <Label Text="{Binding SenderName}"
-                                               FontAttributes="Bold" />
-                                        <Label Text="{Binding SentLocalTime}"
-                                               FontSize="12"
-                                               Opacity="0.7" />
-                                    </HorizontalStackLayout>
-                                    <Label Grid.Row="1"
-                                           Text="{Binding Text}"
-                                           LineBreakMode="WordWrap" />
-                                </Grid>
-                            </DataTemplate>
-                        </CollectionView.ItemTemplate>
-                    </CollectionView>
+            <Grid Grid.Row="1"
+                  ColumnDefinitions="220,*"
+                  ColumnSpacing="12">
+                <Border Grid.Column="0"
+                        StrokeShape="RoundRectangle 10"
+                        Padding="10">
+                    <VerticalStackLayout Spacing="8">
+                        <Label Text="Users"
+                               FontSize="16"
+                               FontAttributes="Bold" />
 
-                    <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <CollectionView ItemsSource="{Binding Users}">
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid ColumnDefinitions="Auto,*"
+                                          ColumnSpacing="8"
+                                          Padding="4,2">
+                                        <Label Grid.Column="0"
+                                               Text="{Binding PresenceIcon}" />
+                                        <Label Grid.Column="1"
+                                               Text="{Binding DisplayName}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                        </CollectionView>
+                    </VerticalStackLayout>
+                </Border>
+
+                <Grid Grid.Column="1"
+                      RowDefinitions="Auto,*,Auto"
+                      RowSpacing="8">
+                    <Border Grid.Row="0"
+                            StrokeShape="RoundRectangle 10"
+                            Padding="10"
+                            IsVisible="{Binding IsSettingsVisible}">
+                        <VerticalStackLayout Spacing="8">
+                            <Label Text="Settings"
+                                   FontAttributes="Bold"
+                                   FontSize="16" />
+
+                            <Grid ColumnDefinitions="*,Auto"
+                                  ColumnSpacing="8">
+                                <Entry Grid.Column="0"
+                                       Placeholder="Set your display name"
+                                       Text="{Binding PendingName}"
+                                       Completed="OnSetNameCompleted" />
+                                <Button Grid.Column="1"
+                                        Text="Set Name"
+                                        Clicked="OnSetNameClicked" />
+                            </Grid>
+
+                            <Grid ColumnDefinitions="Auto,Auto,Auto,*"
+                                  ColumnSpacing="8">
+                                <Label Grid.Column="0"
+                                       Text="Log"
+                                       VerticalOptions="Center" />
+                                <Button Grid.Column="1"
+                                        Text="Copy"
+                                        Clicked="OnCopyLogClicked" />
+                                <Button Grid.Column="2"
+                                        Text="Clear"
+                                        Clicked="OnClearLogClicked" />
+                            </Grid>
+
+                            <Editor Text="{Binding LogText}"
+                                    IsReadOnly="True"
+                                    HeightRequest="120"
+                                    AutoSize="TextChanges"
+                                    Placeholder="Connection and auth logs will appear here." />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Border Grid.Row="1"
+                            StrokeShape="RoundRectangle 10"
+                            Padding="10">
+                        <CollectionView x:Name="MessagesList"
+                                        ItemsSource="{Binding Messages}">
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid RowDefinitions="Auto,Auto"
+                                          Padding="4,6">
+                                        <HorizontalStackLayout Spacing="8">
+                                            <Label Text="{Binding SenderName}"
+                                                   FontAttributes="Bold" />
+                                            <Label Text="{Binding SentLocalTime}"
+                                                   FontSize="12"
+                                                   Opacity="0.7" />
+                                        </HorizontalStackLayout>
+                                        <Label Grid.Row="1"
+                                               Text="{Binding Text}"
+                                               LineBreakMode="WordWrap" />
+                                    </Grid>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                        </CollectionView>
+                    </Border>
+
+                    <Grid Grid.Row="2"
+                          ColumnDefinitions="*,Auto"
+                          ColumnSpacing="8">
                         <Entry Grid.Column="0"
                                Placeholder="Message #general"
                                Text="{Binding PendingMessage}"
@@ -80,7 +159,7 @@
                                 Clicked="OnSendMessageClicked" />
                     </Grid>
                 </Grid>
-            </Border>
+            </Grid>
         </Grid>
     </Grid>
 

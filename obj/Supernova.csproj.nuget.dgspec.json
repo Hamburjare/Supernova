@@ -1,15 +1,15 @@
 {
   "format": 1,
   "restore": {
-    "A:\\Code\\Supernova\\supernova.csproj": {}
+    "A:\\Code\\Supernova\\Supernova.csproj": {}
   },
   "projects": {
-    "A:\\Code\\Supernova\\supernova.csproj": {
+    "A:\\Code\\Supernova\\Supernova.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "A:\\Code\\Supernova\\supernova.csproj",
-        "projectName": "supernova",
-        "projectPath": "A:\\Code\\Supernova\\supernova.csproj",
+        "projectUniqueName": "A:\\Code\\Supernova\\Supernova.csproj",
+        "projectName": "Supernova",
+        "projectPath": "A:\\Code\\Supernova\\Supernova.csproj",
         "packagesPath": "C:\\Users\\kelts\\.nuget\\packages\\",
         "outputPath": "A:\\Code\\Supernova\\obj\\",
         "projectStyle": "PackageReference",

@@ -1,6 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using Microsoft.Maui.ApplicationModel.DataTransfer;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
@@ -8,13 +9,21 @@ namespace Supernova;
 
 public partial class MainPage : ContentPage, INotifyPropertyChanged
 {
-	private const string DefaultServerUri = "https://spacetime.glitchy.rocks";
-	private const string ModuleName = "supernova";
-	private const string AuthTokenPreferenceKey = "supernova_auth_token";
+	private const string OidcTokenPreferenceKey = "supernova_oidc_token";
+	private const string DefaultServerUri = "http://127.0.0.1:3000";
+	private const string DefaultDatabaseName = "supernova";
+	private const string DefaultAuth0Scope = "openid profile email";
+	private const string DefaultAuth0RedirectUri = "supernova://auth";
 
 	private DbConnection? _conn;
 	private IDispatcherTimer? _frameTimer;
-	private bool _connectStarted;
+	private string? _oidcJwt;
+	private bool _configurationLoaded;
+	private string _serverUri = DefaultServerUri;
+	private string _databaseName = DefaultDatabaseName;
+	private bool _useDeviceCodeOnWindows = true;
+	private OidcConfig? _oidcConfig;
+	private readonly OidcAuthService _oidcAuthService = new();
 
 	private readonly Dictionary<Identity, User> _usersByIdentity = new();
 
@@ -22,6 +31,42 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 
 	public ObservableCollection<UserListItem> Users { get; } = new();
 	public ObservableCollection<ChatMessageItem> Messages { get; } = new();
+
+	private string _authStateText = "Not signed in";
+	public string AuthStateText
+	{
+		get => _authStateText;
+		set
+		{
+			if (_authStateText == value)
+			{
+				return;
+			}
+
+			_authStateText = value;
+			RaisePropertyChanged();
+		}
+	}
+
+	public bool IsAuthenticated => !string.IsNullOrWhiteSpace(_oidcJwt);
+	public bool IsLoginViewVisible => !IsAuthenticated;
+	public bool IsChatViewVisible => IsAuthenticated;
+
+	private bool _isSettingsVisible;
+	public bool IsSettingsVisible
+	{
+		get => _isSettingsVisible;
+		set
+		{
+			if (_isSettingsVisible == value)
+			{
+				return;
+			}
+
+			_isSettingsVisible = value;
+			RaisePropertyChanged();
+		}
+	}
 
 	private string _statusText = "Disconnected";
 	public string StatusText
@@ -35,6 +80,23 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 			}
 
 			_statusText = value;
+			RaisePropertyChanged();
+			AppendLog(value);
+		}
+	}
+
+	private string _logText = string.Empty;
+	public string LogText
+	{
+		get => _logText;
+		set
+		{
+			if (_logText == value)
+			{
+				return;
+			}
+
+			_logText = value;
 			RaisePropertyChanged();
 		}
 	}
@@ -75,21 +137,33 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 	{
 		InitializeComponent();
 		BindingContext = this;
+
+		SetAuthenticationToken(Preferences.Get(OidcTokenPreferenceKey, string.Empty));
 	}
 
-	protected override void OnAppearing()
+	protected override async void OnAppearing()
 	{
 		base.OnAppearing();
 
+		if (!_configurationLoaded)
+		{
+			await LoadConfigurationAsync();
+		}
+
 		StartFrameTimer();
 
-		if (_connectStarted)
+		if (_conn is not null)
 		{
 			return;
 		}
 
-		_connectStarted = true;
-		Connect();
+		if (!IsAuthenticated)
+		{
+			StatusText = "Sign in required";
+			return;
+		}
+
+		Connect(_oidcJwt!);
 	}
 
 	protected override void OnDisappearing()
@@ -102,6 +176,17 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 
 	private void Connect()
 	{
+		if (_oidcJwt is null)
+		{
+			StatusText = "Sign in required";
+			return;
+		}
+
+		Connect(_oidcJwt);
+	}
+
+	private void Connect(string oidcToken)
+	{
 		if (_conn is not null)
 		{
 			return;
@@ -109,12 +194,10 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 
 		StatusText = "Connecting...";
 
-		var savedToken = Preferences.Get(AuthTokenPreferenceKey, string.Empty);
-
 		_conn = DbConnection.Builder()
-			.WithUri(DefaultServerUri)
-			.WithDatabaseName(ModuleName)
-			.WithToken(string.IsNullOrWhiteSpace(savedToken) ? null : savedToken)
+			.WithUri(_serverUri)
+			.WithDatabaseName(_databaseName)
+			.WithToken(oidcToken)
 			.OnConnect(OnConnected)
 			.OnDisconnect(OnDisconnected)
 			.OnConnectError(OnConnectError)
@@ -153,7 +236,6 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 		}
 
 		_conn = null;
-		_connectStarted = false;
 		StatusText = "Disconnected";
 	}
 
@@ -192,8 +274,6 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 
 	private void OnConnected(DbConnection conn, Identity identity, string token)
 	{
-		Preferences.Set(AuthTokenPreferenceKey, token);
-
 		MainThread.BeginInvokeOnMainThread(() =>
 		{
 			StatusText = $"Connected as {ShortId(identity)}";
@@ -224,6 +304,12 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 		MainThread.BeginInvokeOnMainThread(() =>
 		{
 			StatusText = $"Connection error: {ex.Message}";
+			if (ex.Message.Contains("auth", StringComparison.OrdinalIgnoreCase)
+				|| ex.Message.Contains("token", StringComparison.OrdinalIgnoreCase)
+				|| ex.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase))
+			{
+				Disconnect();
+			}
 		});
 	}
 
@@ -418,6 +504,12 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 
 	private void SetName()
 	{
+		if (!IsAuthenticated)
+		{
+			StatusText = "Sign in required";
+			return;
+		}
+
 		if (_conn is null)
 		{
 			StatusText = "Not connected";
@@ -446,6 +538,12 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 
 	private void SendMessage()
 	{
+		if (!IsAuthenticated)
+		{
+			StatusText = "Sign in required";
+			return;
+		}
+
 		if (_conn is null)
 		{
 			StatusText = "Not connected";
@@ -460,6 +558,252 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 
 		_conn.Reducers.SendMessage(text);
 		PendingMessage = string.Empty;
+	}
+
+	private async void OnSignInClicked(object? sender, EventArgs e)
+	{
+		await SignInAsync();
+	}
+
+	private void OnSignOutClicked(object? sender, EventArgs e)
+	{
+		Disconnect();
+		Preferences.Remove(OidcTokenPreferenceKey);
+		SetAuthenticationToken(null);
+		StatusText = "Signed out";
+	}
+
+	private void OnToggleSettingsClicked(object? sender, EventArgs e)
+	{
+		if (!IsAuthenticated)
+		{
+			return;
+		}
+
+		IsSettingsVisible = !IsSettingsVisible;
+	}
+
+	private async Task SignInAsync()
+	{
+		if (_oidcConfig is null)
+		{
+			StatusText = "OIDC is not configured. Check .env values.";
+			return;
+		}
+
+		if (_conn is not null)
+		{
+			Disconnect();
+		}
+
+		StatusText = $"Signing in via {_oidcConfig.Authority}...";
+
+		try
+		{
+			OidcTokens tokens;
+			if (DeviceInfo.Platform == DevicePlatform.WinUI)
+			{
+				if (!_useDeviceCodeOnWindows)
+				{
+					StatusText = "Windows requires Device Code auth. Set AUTH0_USE_DEVICE_CODE=true in .env.";
+					return;
+				}
+
+				try
+				{
+					tokens = await _oidcAuthService.SignInWithAuth0DeviceCodeAsync(
+						_oidcConfig,
+						status => MainThread.BeginInvokeOnMainThread(() => StatusText = status));
+				}
+				catch (InvalidOperationException ex) when (ex.Message.Contains("unauthorized_client", StringComparison.OrdinalIgnoreCase)
+					|| ex.Message.Contains("grant type", StringComparison.OrdinalIgnoreCase)
+					|| ex.Message.Contains("device_code", StringComparison.OrdinalIgnoreCase))
+				{
+					StatusText = "Auth0 rejected Device Code. Enable 'Device Code' grant for this Auth0 application.";
+					return;
+				}
+			}
+			else
+			{
+				tokens = await _oidcAuthService.SignInAsync(_oidcConfig);
+			}
+			var jwt = SelectSpacetimeToken(tokens);
+
+			if (string.IsNullOrWhiteSpace(jwt))
+			{
+				throw new InvalidOperationException("OIDC provider did not return a JWT token usable by SpacetimeDB.");
+			}
+
+			Preferences.Set(OidcTokenPreferenceKey, jwt);
+			SetAuthenticationToken(jwt);
+			StatusText = "Sign in successful";
+			Connect(jwt);
+		}
+		catch (OperationCanceledException)
+		{
+			StatusText = "Sign in canceled";
+		}
+		catch (Exception ex)
+		{
+			if (ex.Message.Contains("Unknown host", StringComparison.OrdinalIgnoreCase)
+				|| ex.Message.Contains("Name or service not known", StringComparison.OrdinalIgnoreCase)
+				|| ex.Message.Contains("No such host", StringComparison.OrdinalIgnoreCase))
+			{
+				StatusText = $"Sign in failed: cannot resolve Auth0 host '{_oidcConfig.Authority}'. Rebuild and restart the app after editing .env.";
+				return;
+			}
+
+			StatusText = $"Sign in failed: {ex.Message}";
+		}
+	}
+
+	private async void OnCopyLogClicked(object? sender, EventArgs e)
+	{
+		await Clipboard.Default.SetTextAsync(LogText ?? string.Empty);
+		StatusText = "Log copied to clipboard";
+	}
+
+	private void OnClearLogClicked(object? sender, EventArgs e)
+	{
+		LogText = string.Empty;
+		StatusText = "Log cleared";
+	}
+
+	private async Task LoadConfigurationAsync()
+	{
+		var env = await EnvConfiguration.LoadAsync();
+
+		_serverUri = env.GetOrDefault("SPACETIMEDB_SERVER_URI", DefaultServerUri);
+		_databaseName = env.GetOrDefault("SPACETIMEDB_DATABASE", DefaultDatabaseName);
+
+		var authority = env.Get("AUTH0_DOMAIN");
+		var clientId = env.Get("AUTH0_CLIENT_ID");
+		var scope = env.GetOrDefault("AUTH0_SCOPE", DefaultAuth0Scope);
+		var redirectUri = env.GetOrDefault("AUTH0_REDIRECT_URI", DefaultAuth0RedirectUri);
+		var audience = env.Get("AUTH0_AUDIENCE");
+		var useDeviceCodeRaw = env.GetOrDefault("AUTH0_USE_DEVICE_CODE", "true");
+		_useDeviceCodeOnWindows = !string.Equals(useDeviceCodeRaw, "false", StringComparison.OrdinalIgnoreCase)
+			&& !string.Equals(useDeviceCodeRaw, "0", StringComparison.OrdinalIgnoreCase)
+			&& !string.Equals(useDeviceCodeRaw, "no", StringComparison.OrdinalIgnoreCase);
+
+		if (!string.IsNullOrWhiteSpace(authority)
+			&& !authority.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+			&& !authority.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+		{
+			authority = $"https://{authority}";
+		}
+
+		if (!string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(clientId))
+		{
+			_oidcConfig = new OidcConfig(authority!, clientId!, scope, redirectUri, audience);
+			_configurationLoaded = true;
+			return;
+		}
+
+		StatusText = "Missing AUTH0_DOMAIN or AUTH0_CLIENT_ID in .env";
+		_configurationLoaded = true;
+	}
+
+	private void SetAuthenticationToken(string? jwt)
+	{
+		_oidcJwt = string.IsNullOrWhiteSpace(jwt) ? null : jwt;
+		AuthStateText = _oidcJwt is null ? "Not signed in" : $"Signed in as {DescribeJwt(_oidcJwt)}";
+		RaisePropertyChanged(nameof(IsAuthenticated));
+		RaisePropertyChanged(nameof(IsLoginViewVisible));
+		RaisePropertyChanged(nameof(IsChatViewVisible));
+
+		if (!IsAuthenticated)
+		{
+			IsSettingsVisible = false;
+		}
+	}
+
+	private static string SelectSpacetimeToken(OidcTokens tokens)
+	{
+		if (IsJwt(tokens.IdToken))
+		{
+			return tokens.IdToken!;
+		}
+
+		if (IsJwt(tokens.AccessToken))
+		{
+			return tokens.AccessToken!;
+		}
+
+		return string.Empty;
+	}
+
+	private static bool IsJwt(string? token)
+	{
+		if (string.IsNullOrWhiteSpace(token))
+		{
+			return false;
+		}
+
+		var segments = token.Split('.');
+		return segments.Length == 3;
+	}
+
+	private static string DescribeJwt(string jwt)
+	{
+		try
+		{
+			var payload = jwt.Split('.')[1];
+			var json = DecodeBase64Url(payload);
+			using var doc = System.Text.Json.JsonDocument.Parse(json);
+			if (doc.RootElement.TryGetProperty("email", out var email))
+			{
+				return email.GetString() ?? "authenticated user";
+			}
+
+			if (doc.RootElement.TryGetProperty("name", out var name))
+			{
+				return name.GetString() ?? "authenticated user";
+			}
+
+			if (doc.RootElement.TryGetProperty("sub", out var sub))
+			{
+				var value = sub.GetString();
+				if (!string.IsNullOrWhiteSpace(value))
+				{
+					return value.Length <= 14 ? value : $"{value[..10]}...";
+				}
+			}
+		}
+		catch
+		{
+		}
+
+		return "authenticated user";
+	}
+
+	private static string DecodeBase64Url(string value)
+	{
+		var base64 = value.Replace('-', '+').Replace('_', '/');
+		switch (base64.Length % 4)
+		{
+			case 2:
+				base64 += "==";
+				break;
+			case 3:
+				base64 += "=";
+				break;
+		}
+
+		return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64));
+	}
+
+	private void AppendLog(string message)
+	{
+		if (string.IsNullOrWhiteSpace(message))
+		{
+			return;
+		}
+
+		var line = $"[{DateTime.Now:HH:mm:ss}] {message}";
+		LogText = string.IsNullOrWhiteSpace(LogText)
+			? line
+			: $"{LogText}{Environment.NewLine}{line}";
 	}
 
 	private void RaisePropertyChanged([CallerMemberName] string? propertyName = null)
