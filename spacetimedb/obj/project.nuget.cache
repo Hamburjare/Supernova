@@ -1,10 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "yyVKyKzLSHw=",
+  "dgSpecHash": "Li6SVb8kiWg=",
   "success": true,
   "projectFilePath": "A:\\Code\\Supernova\\spacetimedb\\StdbModule.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\kelts\\.nuget\\packages\\microsoft.net.illink.tasks\\10.0.3\\microsoft.net.illink.tasks.10.0.3.nupkg.sha512",
+    "C:\\Users\\kelts\\.nuget\\packages\\microsoft.net.illink.tasks\\8.0.24\\microsoft.net.illink.tasks.8.0.24.nupkg.sha512",
     "C:\\Users\\kelts\\.nuget\\packages\\spacetimedb.bsatn.runtime\\2.0.2\\spacetimedb.bsatn.runtime.2.0.2.nupkg.sha512",
     "C:\\Users\\kelts\\.nuget\\packages\\spacetimedb.runtime\\2.0.2\\spacetimedb.runtime.2.0.2.nupkg.sha512"
   ],

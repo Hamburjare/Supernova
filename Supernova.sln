@@ -2,6 +2,8 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Supernova", "Supernova.csproj", "{953F09F5-E3FA-2C18-E97C-CECACBDAFBBF}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "spacetimedb", "spacetimedb", "{01DB78B5-D7F7-4422-8E8B-4F2431CB7153}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StdbModule", "spacetimedb\StdbModule.csproj", "{B2489EEA-6985-7499-234F-F3FECD3B2D3D}"
@@ -12,6 +14,10 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{953F09F5-E3FA-2C18-E97C-CECACBDAFBBF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{953F09F5-E3FA-2C18-E97C-CECACBDAFBBF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{953F09F5-E3FA-2C18-E97C-CECACBDAFBBF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{953F09F5-E3FA-2C18-E97C-CECACBDAFBBF}.Release|Any CPU.Build.0 = Release|Any CPU
 		{B2489EEA-6985-7499-234F-F3FECD3B2D3D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{B2489EEA-6985-7499-234F-F3FECD3B2D3D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B2489EEA-6985-7499-234F-F3FECD3B2D3D}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -24,6 +30,6 @@ Global
 		{B2489EEA-6985-7499-234F-F3FECD3B2D3D} = {01DB78B5-D7F7-4422-8E8B-4F2431CB7153}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {D6656ADA-D37B-4B6A-B71C-25256934A6ED}
+		SolutionGuid = {2D62A2BC-06BB-4CCB-9C21-8A72190E8EFC}
 	EndGlobalSection
 EndGlobal
