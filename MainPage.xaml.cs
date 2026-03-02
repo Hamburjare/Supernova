@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.Maui.ApplicationModel.DataTransfer;
 using SpacetimeDB;
 using SpacetimeDB.Types;
+using Supernova.Audio;
 
 namespace Supernova;
 
@@ -24,13 +25,17 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 	private bool _useDeviceCodeOnWindows = true;
 	private OidcConfig? _oidcConfig;
 	private readonly OidcAuthService _oidcAuthService = new();
+	private VoiceChannelService? _voiceService;
+	private Identity? _localIdentity;
 
 	private readonly Dictionary<Identity, User> _usersByIdentity = new();
+	private readonly Dictionary<uint, VoiceChannelListItem> _voiceChannelsById = new();
 
 	public new event PropertyChangedEventHandler? PropertyChanged;
 
 	public ObservableCollection<UserListItem> Users { get; } = new();
 	public ObservableCollection<ChatMessageItem> Messages { get; } = new();
+	public ObservableCollection<VoiceChannelListItem> VoiceChannels { get; } = new();
 
 	private string _authStateText = "Not signed in";
 	public string AuthStateText
@@ -66,6 +71,95 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 			_isSettingsVisible = value;
 			RaisePropertyChanged();
 		}
+	}
+
+	// Voice Channel Properties
+	public bool IsInVoiceChannel => _voiceService?.IsInChannel ?? false;
+
+	private float _micLevel;
+	public float MicLevel
+	{
+		get => _micLevel;
+		set
+		{
+			if (Math.Abs(_micLevel - value) < 0.001f)
+			{
+				return;
+			}
+
+			_micLevel = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(MicLevelColor));
+		}
+	}
+
+	public Color MicLevelColor => _micLevel > (_voiceService?.AudioService.Settings.MicSensitivity ?? 0.02f)
+		? Colors.LimeGreen
+		: Colors.Gray;
+
+	public string MuteButtonText => _voiceService?.AudioService.Settings.IsMuted == true ? "Unmute" : "Mute";
+	public string DeafenButtonText => _voiceService?.AudioService.Settings.IsDeafened == true ? "Undeafen" : "Deafen";
+
+	// Voice Settings Properties
+	private List<AudioDevice> _inputDevices = [];
+	public List<AudioDevice> InputDevices
+	{
+		get => _inputDevices;
+		set { _inputDevices = value; RaisePropertyChanged(); }
+	}
+
+	private List<AudioDevice> _outputDevices = [];
+	public List<AudioDevice> OutputDevices
+	{
+		get => _outputDevices;
+		set { _outputDevices = value; RaisePropertyChanged(); }
+	}
+
+	private AudioDevice? _selectedInputDevice;
+	public AudioDevice? SelectedInputDevice
+	{
+		get => _selectedInputDevice;
+		set { _selectedInputDevice = value; RaisePropertyChanged(); }
+	}
+
+	private AudioDevice? _selectedOutputDevice;
+	public AudioDevice? SelectedOutputDevice
+	{
+		get => _selectedOutputDevice;
+		set { _selectedOutputDevice = value; RaisePropertyChanged(); }
+	}
+
+	// Input/Output volume as 0-2 range (0-200%)
+	private double _inputVolume = 1.0;
+	public double InputVolume
+	{
+		get => _inputVolume;
+		set { _inputVolume = value; RaisePropertyChanged(); RaisePropertyChanged(nameof(InputVolumePercent)); }
+	}
+	public int InputVolumePercent => (int)(_inputVolume * 100);
+
+	private double _outputVolume = 1.0;
+	public double OutputVolume
+	{
+		get => _outputVolume;
+		set { _outputVolume = value; RaisePropertyChanged(); RaisePropertyChanged(nameof(OutputVolumePercent)); }
+	}
+	public int OutputVolumePercent => (int)(_outputVolume * 100);
+
+	// Mic sensitivity (VAD threshold) 0.0 - 0.1
+	private double _micSensitivity = 0.02;
+	public double MicSensitivity
+	{
+		get => _micSensitivity;
+		set { _micSensitivity = value; RaisePropertyChanged(); RaisePropertyChanged(nameof(MicSensitivityPercent)); }
+	}
+	public int MicSensitivityPercent => (int)(_micSensitivity * 1000);
+
+	private bool _hearSelf;
+	public bool HearSelf
+	{
+		get => _hearSelf;
+		set { _hearSelf = value; RaisePropertyChanged(); }
 	}
 
 	private string _statusText = "Disconnected";
@@ -217,6 +311,57 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 		_conn.Db.User.OnUpdate += OnUserUpdated;
 		_conn.Db.User.OnDelete += OnUserDeleted;
 		_conn.Db.Message.OnInsert += OnMessageInserted;
+
+		// Voice channel callbacks
+		_conn.Db.VoiceChannel.OnInsert += OnVoiceChannelInserted;
+		_conn.Db.VoiceChannel.OnDelete += OnVoiceChannelDeleted;
+		_conn.Db.VoiceChannelMember.OnInsert += OnVoiceChannelMemberInserted;
+		_conn.Db.VoiceChannelMember.OnUpdate += OnVoiceChannelMemberUpdated;
+		_conn.Db.VoiceChannelMember.OnDelete += OnVoiceChannelMemberDeleted;
+
+		StartFrameTimer();
+	}
+
+	private void OnVoiceChannelStateChanged(object? sender, bool isInChannel)
+	{
+		RaisePropertyChanged(nameof(IsInVoiceChannel));
+		RaisePropertyChanged(nameof(MuteButtonText));
+		RaisePropertyChanged(nameof(DeafenButtonText));
+	}
+
+	private void OnAudioStateChanged(object? sender, EventArgs e)
+	{
+		RaisePropertyChanged(nameof(MuteButtonText));
+		RaisePropertyChanged(nameof(DeafenButtonText));
+	}
+
+	private void LoadAudioDevices()
+	{
+		if (_voiceService is null)
+		{
+			return;
+		}
+
+		InputDevices = [.. _voiceService.AudioService.GetInputDevices()];
+		OutputDevices = [.. _voiceService.AudioService.GetOutputDevices()];
+
+		// Select current devices
+		var currentInputId = _voiceService.AudioService.Settings.InputDeviceId;
+		var currentOutputId = _voiceService.AudioService.Settings.OutputDeviceId;
+
+		SelectedInputDevice = InputDevices.FirstOrDefault(d => d.Id == currentInputId)
+			?? InputDevices.FirstOrDefault(d => d.IsDefault)
+			?? InputDevices.FirstOrDefault();
+
+		SelectedOutputDevice = OutputDevices.FirstOrDefault(d => d.Id == currentOutputId)
+			?? OutputDevices.FirstOrDefault(d => d.IsDefault)
+			?? OutputDevices.FirstOrDefault();
+
+		// Load current settings into UI
+		InputVolume = _voiceService.AudioService.Settings.MicrophoneVolume / 100.0;
+		OutputVolume = _voiceService.AudioService.Settings.OutputVolume / 100.0;
+		MicSensitivity = _voiceService.AudioService.Settings.MicSensitivity;
+		HearSelf = _voiceService.AudioService.Settings.HearSelf;
 	}
 
 	private void Disconnect()
@@ -225,6 +370,10 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 		{
 			return;
 		}
+
+		// Clean up voice service
+		_voiceService?.Dispose();
+		_voiceService = null;
 
 		try
 		{
@@ -237,6 +386,11 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 
 		_conn = null;
 		StatusText = "Disconnected";
+
+		// Clear voice channels
+		VoiceChannels.Clear();
+		_voiceChannelsById.Clear();
+		RaisePropertyChanged(nameof(IsInVoiceChannel));
 	}
 
 	private void StartFrameTimer()
@@ -274,9 +428,20 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 
 	private void OnConnected(DbConnection conn, Identity identity, string token)
 	{
+		_localIdentity = identity;
+
+		// Initialize voice service now that we have the identity
+		_voiceService = new VoiceChannelService();
+		_voiceService.Initialize(conn, identity);
+		_voiceService.MicLevelChanged += OnVoiceMicLevelChanged;
+		_voiceService.UserSpeaking += OnVoiceUserSpeaking;
+		_voiceService.ChannelStateChanged += OnVoiceChannelStateChanged;
+		_voiceService.AudioStateChanged += OnAudioStateChanged;
+
 		MainThread.BeginInvokeOnMainThread(() =>
 		{
 			StatusText = $"Connected as {ShortId(identity)}";
+			LoadAudioDevices();
 		});
 
 		conn.SubscriptionBuilder()
@@ -320,6 +485,8 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 			_usersByIdentity.Clear();
 			Users.Clear();
 			Messages.Clear();
+			VoiceChannels.Clear();
+			_voiceChannelsById.Clear();
 
 			foreach (var user in ctx.Db.User.Iter())
 			{
@@ -329,6 +496,28 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 			foreach (var message in ctx.Db.Message.Iter().OrderBy(x => x.Sent.MicrosecondsSinceUnixEpoch))
 			{
 				AddMessage(message);
+			}
+
+			// Load voice channels
+			foreach (var channel in ctx.Db.VoiceChannel.Iter())
+			{
+				UpsertVoiceChannel(channel);
+			}
+
+			// Load voice channel members
+			foreach (var member in ctx.Db.VoiceChannelMember.Iter())
+			{
+				AddVoiceChannelMember(member);
+			}
+
+			// Load user's saved audio settings
+			if (_localIdentity.HasValue && _voiceService is not null)
+			{
+				var savedSettings = ctx.Db.UserAudioSettings.UserId.Find(_localIdentity.Value);
+				if (savedSettings is not null)
+				{
+					ApplySavedAudioSettings(savedSettings);
+				}
 			}
 
 			StatusText = "Subscribed to messages and users";
@@ -402,6 +591,349 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 				StatusText = $"Send failed: {reason}";
 			}
 		});
+	}
+
+	// ===========================
+	// Voice Channel Callbacks
+	// ===========================
+
+	private void OnVoiceChannelInserted(EventContext _, VoiceChannel channel)
+	{
+		MainThread.BeginInvokeOnMainThread(() => UpsertVoiceChannel(channel));
+	}
+
+	private void OnVoiceChannelDeleted(EventContext _, VoiceChannel channel)
+	{
+		MainThread.BeginInvokeOnMainThread(() =>
+		{
+			if (_voiceChannelsById.TryGetValue(channel.Id, out var item))
+			{
+				VoiceChannels.Remove(item);
+				_voiceChannelsById.Remove(channel.Id);
+			}
+		});
+	}
+
+	private void OnVoiceChannelMemberInserted(EventContext _, VoiceChannelMember member)
+	{
+		MainThread.BeginInvokeOnMainThread(() => AddVoiceChannelMember(member));
+	}
+
+	private void OnVoiceChannelMemberUpdated(EventContext _, VoiceChannelMember __, VoiceChannelMember member)
+	{
+		MainThread.BeginInvokeOnMainThread(() => UpdateVoiceChannelMember(member));
+	}
+
+	private void OnVoiceChannelMemberDeleted(EventContext _, VoiceChannelMember member)
+	{
+		MainThread.BeginInvokeOnMainThread(() => RemoveVoiceChannelMember(member));
+	}
+
+	private void OnVoiceMicLevelChanged(object? sender, float level)
+	{
+		MicLevel = level;
+	}
+
+	private void OnVoiceUserSpeaking(object? sender, (Identity User, float Level) args)
+	{
+		// Find the member in the UI and update speaking state
+		foreach (var channel in VoiceChannels)
+		{
+			var member = channel.Members.FirstOrDefault(m => m.UserId == args.User);
+			if (member is not null)
+			{
+				member.IsSpeaking = args.Level > (_voiceService?.AudioService.Settings.MicSensitivity ?? 0.02f);
+
+				// Reset speaking after a delay
+				Task.Delay(200).ContinueWith(_ =>
+				{
+					MainThread.BeginInvokeOnMainThread(() =>
+					{
+						member.IsSpeaking = false;
+					});
+				});
+				break;
+			}
+		}
+	}
+
+	private void UpsertVoiceChannel(VoiceChannel channel)
+	{
+		if (!_voiceChannelsById.TryGetValue(channel.Id, out var existing))
+		{
+			existing = new VoiceChannelListItem(channel.Id, channel.Name, channel.MaxMembers);
+			VoiceChannels.Add(existing);
+			_voiceChannelsById[channel.Id] = existing;
+		}
+
+		// Update current channel state
+		existing.IsCurrentChannel = _voiceService?.CurrentChannelId == channel.Id;
+	}
+
+	private void AddVoiceChannelMember(VoiceChannelMember member)
+	{
+		if (!_voiceChannelsById.TryGetValue(member.ChannelId, out var channel))
+		{
+			return;
+		}
+
+		// Check if member already exists
+		if (channel.Members.Any(m => m.UserId == member.UserId))
+		{
+			return;
+		}
+
+		var userName = ResolveDisplayName(member.UserId);
+		var memberItem = new VoiceChannelMemberListItem(member.UserId, userName)
+		{
+			IsMuted = member.IsMuted,
+			IsDeafened = member.IsDeafened
+		};
+		channel.Members.Add(memberItem);
+	}
+
+	private void UpdateVoiceChannelMember(VoiceChannelMember member)
+	{
+		if (!_voiceChannelsById.TryGetValue(member.ChannelId, out var channel))
+		{
+			return;
+		}
+
+		var existing = channel.Members.FirstOrDefault(m => m.UserId == member.UserId);
+		if (existing is not null)
+		{
+			existing.IsMuted = member.IsMuted;
+			existing.IsDeafened = member.IsDeafened;
+		}
+	}
+
+	private void RemoveVoiceChannelMember(VoiceChannelMember member)
+	{
+		if (!_voiceChannelsById.TryGetValue(member.ChannelId, out var channel))
+		{
+			return;
+		}
+
+		var existing = channel.Members.FirstOrDefault(m => m.UserId == member.UserId);
+		if (existing is not null)
+		{
+			channel.Members.Remove(existing);
+		}
+	}
+
+	// ===========================
+	// Voice Channel Event Handlers
+	// ===========================
+
+	private void OnVoiceChannelJoinClicked(object? sender, EventArgs e)
+	{
+		if (sender is Button button && button.CommandParameter is uint channelId)
+		{
+			if (_voiceService?.CurrentChannelId == channelId)
+			{
+				LeaveVoiceChannel();
+			}
+			else
+			{
+				JoinVoiceChannel(channelId);
+			}
+		}
+	}
+
+	private void OnMuteClicked(object? sender, EventArgs e)
+	{
+		if (_voiceService is null)
+		{
+			return;
+		}
+
+		var newMuted = !_voiceService.AudioService.Settings.IsMuted;
+		_voiceService.SetMuted(newMuted);
+		RaisePropertyChanged(nameof(MuteButtonText));
+	}
+
+	private void OnDeafenClicked(object? sender, EventArgs e)
+	{
+		if (_voiceService is null)
+		{
+			return;
+		}
+
+		var newDeafened = !_voiceService.AudioService.Settings.IsDeafened;
+		_voiceService.SetDeafened(newDeafened);
+		RaisePropertyChanged(nameof(DeafenButtonText));
+		RaisePropertyChanged(nameof(MuteButtonText));
+	}
+
+	private void OnLeaveVoiceChannelClicked(object? sender, EventArgs e)
+	{
+		LeaveVoiceChannel();
+	}
+
+	private void OnInputDeviceChanged(object? sender, EventArgs e)
+	{
+		if (_voiceService is null || SelectedInputDevice is null)
+		{
+			return;
+		}
+
+		_voiceService.AudioService.Settings.InputDeviceId = SelectedInputDevice.Id;
+		// Restart capture if currently capturing to use new device
+		if (_voiceService.AudioService.IsCapturing)
+		{
+			_voiceService.AudioService.StopCapture();
+			_voiceService.AudioService.StartCapture();
+		}
+		SaveAudioSettingsToDb();
+	}
+
+	private void OnOutputDeviceChanged(object? sender, EventArgs e)
+	{
+		if (_voiceService is null || SelectedOutputDevice is null)
+		{
+			return;
+		}
+
+		_voiceService.AudioService.Settings.OutputDeviceId = SelectedOutputDevice.Id;
+		SaveAudioSettingsToDb();
+	}
+
+	private void OnInputVolumeChanged(object? sender, ValueChangedEventArgs e)
+	{
+		if (_voiceService is null)
+		{
+			return;
+		}
+
+		_voiceService.AudioService.Settings.MicrophoneVolume = (int)(e.NewValue * 100);
+		SaveAudioSettingsToDb();
+	}
+
+	private void OnOutputVolumeChanged(object? sender, ValueChangedEventArgs e)
+	{
+		if (_voiceService is null)
+		{
+			return;
+		}
+
+		_voiceService.AudioService.Settings.OutputVolume = (int)(e.NewValue * 100);
+		SaveAudioSettingsToDb();
+	}
+
+	private void OnMicSensitivityChanged(object? sender, ValueChangedEventArgs e)
+	{
+		if (_voiceService is null)
+		{
+			return;
+		}
+
+		_voiceService.AudioService.Settings.MicSensitivity = (float)e.NewValue;
+		RaisePropertyChanged(nameof(MicLevelColor));
+		SaveAudioSettingsToDb();
+	}
+
+	private void OnHearSelfToggled(object? sender, ToggledEventArgs e)
+	{
+		if (_voiceService is null)
+		{
+			return;
+		}
+
+		_voiceService.AudioService.Settings.HearSelf = e.Value;
+		SaveAudioSettingsToDb();
+	}
+
+	private void ApplySavedAudioSettings(UserAudioSettings settings)
+	{
+		if (_voiceService is null)
+		{
+			return;
+		}
+
+		// Apply to audio service
+		_voiceService.AudioService.Settings.InputDeviceId = settings.InputDeviceId;
+		_voiceService.AudioService.Settings.OutputDeviceId = settings.OutputDeviceId;
+		_voiceService.AudioService.Settings.MicrophoneVolume = settings.MicrophoneVolume;
+		_voiceService.AudioService.Settings.OutputVolume = settings.OutputVolume;
+		_voiceService.AudioService.Settings.MicSensitivity = settings.MicSensitivity / 1000f; // Convert from 0-100 to 0.0-0.1
+		_voiceService.AudioService.Settings.HearSelf = settings.HearSelf;
+
+		// Update UI bindings
+		InputVolume = settings.MicrophoneVolume / 100.0;
+		OutputVolume = settings.OutputVolume / 100.0;
+		MicSensitivity = settings.MicSensitivity / 1000.0; // Convert to 0.0-0.1 range
+		HearSelf = settings.HearSelf;
+
+		// Select devices in pickers
+		SelectedInputDevice = InputDevices.FirstOrDefault(d => d.Id == settings.InputDeviceId)
+			?? InputDevices.FirstOrDefault(d => d.IsDefault)
+			?? InputDevices.FirstOrDefault();
+
+		SelectedOutputDevice = OutputDevices.FirstOrDefault(d => d.Id == settings.OutputDeviceId)
+			?? OutputDevices.FirstOrDefault(d => d.IsDefault)
+			?? OutputDevices.FirstOrDefault();
+	}
+
+	private void SaveAudioSettingsToDb()
+	{
+		if (_conn is null || _voiceService is null)
+		{
+			return;
+		}
+
+		var settings = _voiceService.AudioService.Settings;
+		_conn.Reducers.SaveAudioSettings(
+			settings.InputDeviceId,
+			settings.OutputDeviceId,
+			(byte)Math.Clamp(settings.MicrophoneVolume, 0, 200),
+			(byte)Math.Clamp(settings.OutputVolume, 0, 200),
+			(byte)Math.Clamp((int)(settings.MicSensitivity * 1000), 0, 100), // Convert 0.0-0.1 to 0-100
+			settings.HearSelf);
+	}
+
+	private void JoinVoiceChannel(uint channelId)
+	{
+		if (_voiceService is null)
+		{
+			StatusText = "Voice service not available";
+			return;
+		}
+
+		try
+		{
+			_voiceService.JoinChannel(channelId);
+
+			// Update UI
+			foreach (var channel in VoiceChannels)
+			{
+				channel.IsCurrentChannel = channel.Id == channelId;
+			}
+
+			RaisePropertyChanged(nameof(IsInVoiceChannel));
+			StatusText = $"Joining voice channel...";
+		}
+		catch (Exception ex)
+		{
+			StatusText = $"Failed to join: {ex.Message}";
+		}
+	}
+
+	private void LeaveVoiceChannel()
+	{
+		if (_voiceService is null)
+		{
+			return;
+		}
+
+		_voiceService.LeaveChannel();
+
+		foreach (var channel in VoiceChannels)
+		{
+			channel.IsCurrentChannel = false;
+		}
+
+		RaisePropertyChanged(nameof(IsInVoiceChannel));
+		StatusText = "Left voice channel";
 	}
 
 	private void UpsertUser(User user)
@@ -895,5 +1427,111 @@ public sealed class ChatMessageItem : INotifyPropertyChanged
 		_senderName = senderName;
 		Text = text;
 		SentAt = sentAt;
+	}
+}
+
+/// <summary>
+/// View model for voice channel list items.
+/// </summary>
+public sealed class VoiceChannelListItem : INotifyPropertyChanged
+{
+	public event PropertyChangedEventHandler? PropertyChanged;
+
+	public uint Id { get; }
+	public string Name { get; }
+	public uint MaxMembers { get; }
+
+	private bool _isCurrentChannel;
+	public bool IsCurrentChannel
+	{
+		get => _isCurrentChannel;
+		set
+		{
+			if (_isCurrentChannel == value) return;
+			_isCurrentChannel = value;
+			PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsCurrentChannel)));
+			PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(JoinButtonText)));
+		}
+	}
+
+	public string JoinButtonText => IsCurrentChannel ? "Leave" : "Join";
+
+	public ObservableCollection<VoiceChannelMemberListItem> Members { get; } = new();
+
+	public VoiceChannelListItem(uint id, string name, uint maxMembers)
+	{
+		Id = id;
+		Name = name;
+		MaxMembers = maxMembers;
+	}
+}
+
+/// <summary>
+/// View model for voice channel member list items.
+/// </summary>
+public sealed class VoiceChannelMemberListItem : INotifyPropertyChanged
+{
+	public event PropertyChangedEventHandler? PropertyChanged;
+
+	public Identity UserId { get; }
+
+	private string _userName;
+	public string UserName
+	{
+		get => _userName;
+		set
+		{
+			if (_userName == value) return;
+			_userName = value;
+			PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UserName)));
+		}
+	}
+
+	private bool _isMuted;
+	public bool IsMuted
+	{
+		get => _isMuted;
+		set
+		{
+			if (_isMuted == value) return;
+			_isMuted = value;
+			PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsMuted)));
+			PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusIcon)));
+		}
+	}
+
+	private bool _isDeafened;
+	public bool IsDeafened
+	{
+		get => _isDeafened;
+		set
+		{
+			if (_isDeafened == value) return;
+			_isDeafened = value;
+			PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsDeafened)));
+			PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusIcon)));
+		}
+	}
+
+	private bool _isSpeaking;
+	public bool IsSpeaking
+	{
+		get => _isSpeaking;
+		set
+		{
+			if (_isSpeaking == value) return;
+			_isSpeaking = value;
+			PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSpeaking)));
+			PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SpeakingIndicatorColor)));
+		}
+	}
+
+	public string StatusIcon => IsDeafened ? "🔇" : IsMuted ? "🔇" : "🎤";
+	public Color SpeakingIndicatorColor => IsSpeaking ? Colors.LimeGreen : Colors.Transparent;
+
+	public VoiceChannelMemberListItem(Identity userId, string userName)
+	{
+		UserId = userId;
+		_userName = userName;
 	}
 }

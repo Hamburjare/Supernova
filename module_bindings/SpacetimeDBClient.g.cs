@@ -27,8 +27,13 @@ namespace SpacetimeDB.Types
     {
         public RemoteTables(DbConnection conn)
         {
+            AddTable(AudioFrameEvent = new(conn));
             AddTable(Message = new(conn));
             AddTable(User = new(conn));
+            AddTable(UserAudioSettings = new(conn));
+            AddTable(UserVolumeSettings = new(conn));
+            AddTable(VoiceChannel = new(conn));
+            AddTable(VoiceChannelMember = new(conn));
         }
     }
 
@@ -525,16 +530,26 @@ namespace SpacetimeDB.Types
 
         internal static string[] AllTablesSqlQueries() => new string[]
         {
+            new QueryBuilder().From.AudioFrameEvent().ToSql(),
             new QueryBuilder().From.Message().ToSql(),
             new QueryBuilder().From.User().ToSql(),
+            new QueryBuilder().From.UserAudioSettings().ToSql(),
+            new QueryBuilder().From.UserVolumeSettings().ToSql(),
+            new QueryBuilder().From.VoiceChannel().ToSql(),
+            new QueryBuilder().From.VoiceChannelMember().ToSql(),
         }
         ;
     }
 
     public sealed class From
     {
+        public global::SpacetimeDB.Table<AudioFrameEvent, AudioFrameEventCols, AudioFrameEventIxCols> AudioFrameEvent() => new("audio_frame_event", new AudioFrameEventCols("audio_frame_event"), new AudioFrameEventIxCols("audio_frame_event"));
         public global::SpacetimeDB.Table<Message, MessageCols, MessageIxCols> Message() => new("message", new MessageCols("message"), new MessageIxCols("message"));
         public global::SpacetimeDB.Table<User, UserCols, UserIxCols> User() => new("user", new UserCols("user"), new UserIxCols("user"));
+        public global::SpacetimeDB.Table<UserAudioSettings, UserAudioSettingsCols, UserAudioSettingsIxCols> UserAudioSettings() => new("user_audio_settings", new UserAudioSettingsCols("user_audio_settings"), new UserAudioSettingsIxCols("user_audio_settings"));
+        public global::SpacetimeDB.Table<UserVolumeSettings, UserVolumeSettingsCols, UserVolumeSettingsIxCols> UserVolumeSettings() => new("user_volume_settings", new UserVolumeSettingsCols("user_volume_settings"), new UserVolumeSettingsIxCols("user_volume_settings"));
+        public global::SpacetimeDB.Table<VoiceChannel, VoiceChannelCols, VoiceChannelIxCols> VoiceChannel() => new("voice_channel", new VoiceChannelCols("voice_channel"), new VoiceChannelIxCols("voice_channel"));
+        public global::SpacetimeDB.Table<VoiceChannelMember, VoiceChannelMemberCols, VoiceChannelMemberIxCols> VoiceChannelMember() => new("voice_channel_member", new VoiceChannelMemberCols("voice_channel_member"), new VoiceChannelMemberIxCols("voice_channel_member"));
     }
 
     public sealed class TypedSubscriptionBuilder
@@ -616,8 +631,17 @@ namespace SpacetimeDB.Types
             var eventContext = (ReducerEventContext)context;
             return reducer switch
             {
+                Reducer.CreateVoiceChannel args => Reducers.InvokeCreateVoiceChannel(eventContext, args),
+                Reducer.DeleteVoiceChannel args => Reducers.InvokeDeleteVoiceChannel(eventContext, args),
+                Reducer.JoinVoiceChannel args => Reducers.InvokeJoinVoiceChannel(eventContext, args),
+                Reducer.LeaveVoiceChannel args => Reducers.InvokeLeaveVoiceChannel(eventContext, args),
+                Reducer.SaveAudioSettings args => Reducers.InvokeSaveAudioSettings(eventContext, args),
+                Reducer.SendAudioFrame args => Reducers.InvokeSendAudioFrame(eventContext, args),
                 Reducer.SendMessage args => Reducers.InvokeSendMessage(eventContext, args),
                 Reducer.SetName args => Reducers.InvokeSetName(eventContext, args),
+                Reducer.SetUserVolume args => Reducers.InvokeSetUserVolume(eventContext, args),
+                Reducer.SetVoiceDeafened args => Reducers.InvokeSetVoiceDeafened(eventContext, args),
+                Reducer.SetVoiceMuted args => Reducers.InvokeSetVoiceMuted(eventContext, args),
                 _ => throw new ArgumentOutOfRangeException("Reducer", $"Unknown reducer {reducer}")
             };
         }

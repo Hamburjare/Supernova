@@ -1,20 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFrameworks>net10.0-android</TargetFrameworks>
-		<TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">
-			$(TargetFrameworks);net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
-		<TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">
-			$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
-
-		<!-- Note for MacCatalyst:
-		The default runtime is maccatalyst-x64, except in Release config, in which case the default is
-		maccatalyst-x64;maccatalyst-arm64.
-		When specifying both architectures, use the plural <RuntimeIdentifiers> instead of the singular
-		<RuntimeIdentifier>.
-		The Mac App Store will NOT accept apps with ONLY maccatalyst-arm64 indicated;
-		either BOTH runtimes must be indicated or ONLY macatalyst-x64. -->
-		<!-- For example: <RuntimeIdentifiers>maccatalyst-x64;maccatalyst-arm64</RuntimeIdentifiers> -->
+		<TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
 
 		<OutputType>Exe</OutputType>
 		<RootNamespace>Supernova</RootNamespace>
@@ -46,21 +33,8 @@
 		https://aka.ms/MauiTemplateUnpackaged -->
 		<WindowsPackageType>None</WindowsPackageType>
 
-		<SupportedOSPlatformVersion
-			Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
-			15.0</SupportedOSPlatformVersion>
-		<SupportedOSPlatformVersion
-			Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">
-			15.0</SupportedOSPlatformVersion>
-		<SupportedOSPlatformVersion
-			Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
-			21.0</SupportedOSPlatformVersion>
-		<SupportedOSPlatformVersion
-			Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
-			10.0.17763.0</SupportedOSPlatformVersion>
-		<TargetPlatformMinVersion
-			Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
-			10.0.17763.0</TargetPlatformMinVersion>
+		<SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+		<TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -80,17 +54,60 @@
 
 		<!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
-		<MauiAsset Include=".env" LogicalName=".env" />
+		
+		<!-- Include .env for development, .env.enc for production -->
+		<MauiAsset Include=".env" LogicalName=".env" Condition="!Exists('.env.enc')" />
+		<MauiAsset Include=".env.enc" LogicalName=".env.enc" Condition="Exists('.env.enc')" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
 		<PackageReference Include="SpacetimeDB.ClientSDK" Version="2.0.2" />
+		<PackageReference Include="Concentus" Version="2.2.2" />
+	</ItemGroup>
+
+	<!-- Windows-only audio packages -->
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+		<PackageReference Include="NAudio" Version="2.2.1" />
+		<PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<Compile Remove="spacetimedb/**" />
+		<Compile Remove="Tools/**" />
 	</ItemGroup>
+
+	<!-- Generate the encryption key holder class when key is provided -->
+	<Target Name="GenerateEnvKeyClass" BeforeTargets="CoreCompile" Condition="'$(SUPERNOVA_ENV_KEY)' != ''">
+		<PropertyGroup>
+			<EnvKeyClassContent><![CDATA[
+// Auto-generated file - do not edit
+namespace Supernova%3B
+
+internal static class SupernovaEnvKey
+{
+    public const string Value = "$(SUPERNOVA_ENV_KEY)"%3B
+}
+]]></EnvKeyClassContent>
+		</PropertyGroup>
+		<WriteLinesToFile
+			File="$(IntermediateOutputPath)SupernovaEnvKey.g.cs"
+			Lines="$(EnvKeyClassContent)"
+			Overwrite="true"
+			WriteOnlyWhenDifferent="true" />
+		<ItemGroup>
+			<Compile Include="$(IntermediateOutputPath)SupernovaEnvKey.g.cs" />
+		</ItemGroup>
+	</Target>
+
+	<!-- Encrypt .env file during Release builds when key is provided -->
+	<Target Name="EncryptEnvFile" BeforeTargets="Build" Condition="'$(Configuration)' == 'Release' AND '$(SUPERNOVA_ENV_KEY)' != '' AND Exists('.env')">
+		<Exec Command="dotnet run --project Tools/EncryptEnv -- .env .env.enc $(SUPERNOVA_ENV_KEY)"
+			  WorkingDirectory="$(MSBuildProjectDirectory)"
+			  ConsoleToMSBuild="true"
+			  IgnoreExitCode="false" />
+		<Message Importance="high" Text="Encrypted .env -> .env.enc for secure distribution" />
+	</Target>
 
 </Project>
