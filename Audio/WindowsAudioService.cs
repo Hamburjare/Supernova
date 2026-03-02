@@ -1,7 +1,7 @@
 #if WINDOWS
 using NAudio.Wave;
 using NAudio.CoreAudioApi;
-using Concentus.Structs;
+using Concentus;
 using Concentus.Enums;
 
 namespace Supernova.Audio;
@@ -20,11 +20,11 @@ public sealed class WindowsAudioService : IAudioService
 
 	private readonly AudioSettings _settings = new();
 	private readonly Dictionary<string, int> _userVolumes = new();
-	private readonly Dictionary<string, (WaveOutEvent player, BufferedWaveProvider buffer, OpusDecoder decoder)> _userPlayback = new();
+	private readonly Dictionary<string, (WaveOutEvent player, BufferedWaveProvider buffer, IOpusDecoder decoder)> _userPlayback = new();
 	private readonly object _lock = new();
 
 	private WasapiCapture? _capture;
-	private OpusEncoder? _encoder;
+	private IOpusEncoder? _encoder;
 	private uint _sequenceNumber;
 	private float _currentMicLevel;
 	private bool _isVoiceDetected;
@@ -136,13 +136,11 @@ public sealed class WindowsAudioService : IAudioService
 				return;
 			}
 
-			_encoder = new OpusEncoder(SampleRate, Channels, OpusApplication.OPUS_APPLICATION_VOIP)
-			{
-				Bitrate = 32000,
-				Complexity = 5,
-				SignalType = OpusSignal.OPUS_SIGNAL_VOICE,
-				UseVBR = true
-			};
+			_encoder = OpusCodecFactory.CreateEncoder(SampleRate, Channels, OpusApplication.OPUS_APPLICATION_VOIP);
+			_encoder.Bitrate = 32000;
+			_encoder.Complexity = 5;
+			_encoder.SignalType = OpusSignal.OPUS_SIGNAL_VOICE;
+			_encoder.UseVBR = true;
 
 			_capture = new WasapiCapture(device)
 			{
@@ -226,7 +224,7 @@ public sealed class WindowsAudioService : IAudioService
 					DiscardOnBufferOverflow = true
 				};
 
-				var decoder = new OpusDecoder((int)frame.SampleRate, frame.Channels);
+				var decoder = OpusCodecFactory.CreateDecoder((int)frame.SampleRate, frame.Channels);
 				var player = new WaveOutEvent
 				{
 					DesiredLatency = 200,
@@ -255,15 +253,20 @@ public sealed class WindowsAudioService : IAudioService
 					playback.player.Play();
 				}
 
-				// Decode Opus to PCM
-				var pcmBuffer = new short[FrameSamples * frame.Channels];
-				var samplesDecoded = playback.decoder.Decode(frame.OpusData, 0, frame.OpusData.Length, pcmBuffer, 0, FrameSamples);
+				// Decode Opus to PCM (IOpusDecoder uses float samples)
+				var pcmFloat = new float[FrameSamples * frame.Channels];
+				var samplesDecoded = playback.decoder.Decode(frame.OpusData.AsSpan(), pcmFloat.AsSpan(), FrameSamples, false);
 
 				if (samplesDecoded > 0)
 				{
-					// Convert short[] to byte[] for BufferedWaveProvider
+					// Convert float[] to byte[] for BufferedWaveProvider
 					var byteBuffer = new byte[samplesDecoded * frame.Channels * 2];
-					Buffer.BlockCopy(pcmBuffer, 0, byteBuffer, 0, byteBuffer.Length);
+					for (int i = 0; i < samplesDecoded * frame.Channels; i++)
+					{
+						short sample = (short)(Math.Clamp(pcmFloat[i], -1f, 1f) * short.MaxValue);
+						byteBuffer[i * 2] = (byte)(sample & 0xFF);
+						byteBuffer[i * 2 + 1] = (byte)(sample >> 8);
+					}
 					playback.buffer.AddSamples(byteBuffer, 0, byteBuffer.Length);
 				}
 			}
@@ -360,15 +363,15 @@ public sealed class WindowsAudioService : IAudioService
 					}
 				}
 
-				// Encode to Opus
-				var pcmShort = new short[FrameSamples];
+				// Encode to Opus (IOpusEncoder uses float samples)
+				var pcmFloat = new float[FrameSamples];
 				for (int i = 0; i < FrameSamples; i++)
 				{
-					pcmShort[i] = (short)(Math.Clamp(fadedFrame[i], -1f, 1f) * short.MaxValue);
+					pcmFloat[i] = Math.Clamp(fadedFrame[i], -1f, 1f);
 				}
 
 				var opusBuffer = new byte[MaxOpusFrameSize];
-				var encodedLength = _encoder.Encode(pcmShort, 0, FrameSamples, opusBuffer, 0, opusBuffer.Length);
+				var encodedLength = _encoder.Encode(pcmFloat.AsSpan(), FrameSamples, opusBuffer.AsSpan(), MaxOpusFrameSize);
 
 				if (encodedLength > 0)
 				{
