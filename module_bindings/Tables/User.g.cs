@@ -40,14 +40,14 @@ namespace SpacetimeDB.Types
     public sealed class UserCols
     {
         public global::SpacetimeDB.Col<User, SpacetimeDB.Identity> Identity { get; }
-        public global::SpacetimeDB.NullableCol<User, string> Name { get; }
-        public global::SpacetimeDB.Col<User, bool> Online { get; }
+        public global::SpacetimeDB.Col<User, string> Nickname { get; }
+        public global::SpacetimeDB.Col<User, SpacetimeDB.Timestamp> ConnectedAt { get; }
 
         public UserCols(string tableName)
         {
             Identity = new global::SpacetimeDB.Col<User, SpacetimeDB.Identity>(tableName, "identity");
-            Name = new global::SpacetimeDB.NullableCol<User, string>(tableName, "name");
-            Online = new global::SpacetimeDB.Col<User, bool>(tableName, "online");
+            Nickname = new global::SpacetimeDB.Col<User, string>(tableName, "nickname");
+            ConnectedAt = new global::SpacetimeDB.Col<User, SpacetimeDB.Timestamp>(tableName, "connected_at");
         }
     }
 

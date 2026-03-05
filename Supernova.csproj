@@ -1,11 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFrameworks>net10.0-android</TargetFrameworks>
-		<TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">
-			$(TargetFrameworks);net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
-		<TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">
-			$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
+		<TargetFramework Condition="$([MSBuild]::IsOSPlatform('windows'))">net10.0-windows10.0.19041.0</TargetFramework>
 
 		<!-- Note for MacCatalyst:
 		The default runtime is maccatalyst-x64, except in Release config, in which case the default is
@@ -46,21 +42,8 @@
 		https://aka.ms/MauiTemplateUnpackaged -->
 		<WindowsPackageType>None</WindowsPackageType>
 
-		<SupportedOSPlatformVersion
-			Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
-			15.0</SupportedOSPlatformVersion>
-		<SupportedOSPlatformVersion
-			Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">
-			15.0</SupportedOSPlatformVersion>
-		<SupportedOSPlatformVersion
-			Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
-			21.0</SupportedOSPlatformVersion>
-		<SupportedOSPlatformVersion
-			Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
-			10.0.17763.0</SupportedOSPlatformVersion>
-		<TargetPlatformMinVersion
-			Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
-			10.0.17763.0</TargetPlatformMinVersion>
+		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
+		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -86,10 +69,17 @@
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
 		<PackageReference Include="SpacetimeDB.ClientSDK" Version="2.0.2" />
+		<PackageReference Include="NAudio" Version="2.2.1" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<Compile Remove="spacetimedb/**" />
+		<Compile Remove="Tools/**" />
 	</ItemGroup>
+
+	<!-- Encrypt .env into Resources/Raw/env.enc before build -->
+	<Target Name="EncryptEnv" BeforeTargets="PrepareForBuild" Condition="Exists('$(ProjectDir).env')">
+		<Exec Command="dotnet run --no-launch-profile --project &quot;$(ProjectDir)Tools\EncryptEnv&quot; -- &quot;$(ProjectDir).env&quot; &quot;$(ProjectDir)Resources\Raw\env.enc&quot;" />
+	</Target>
 
 </Project>

@@ -27,8 +27,12 @@ namespace SpacetimeDB.Types
     {
         public RemoteTables(DbConnection conn)
         {
-            AddTable(Message = new(conn));
+            AddTable(AudioFrameEvent = new(conn));
+            AddTable(CallSession = new(conn));
+            AddTable(ChatMessage = new(conn));
+            AddTable(MediaSettings = new(conn));
             AddTable(User = new(conn));
+            AddTable(VideoFrameEvent = new(conn));
         }
     }
 
@@ -525,16 +529,24 @@ namespace SpacetimeDB.Types
 
         internal static string[] AllTablesSqlQueries() => new string[]
         {
-            new QueryBuilder().From.Message().ToSql(),
+            new QueryBuilder().From.AudioFrameEvent().ToSql(),
+            new QueryBuilder().From.CallSession().ToSql(),
+            new QueryBuilder().From.ChatMessage().ToSql(),
+            new QueryBuilder().From.MediaSettings().ToSql(),
             new QueryBuilder().From.User().ToSql(),
+            new QueryBuilder().From.VideoFrameEvent().ToSql(),
         }
         ;
     }
 
     public sealed class From
     {
-        public global::SpacetimeDB.Table<Message, MessageCols, MessageIxCols> Message() => new("message", new MessageCols("message"), new MessageIxCols("message"));
+        public global::SpacetimeDB.Table<AudioFrameEvent, AudioFrameEventCols, AudioFrameEventIxCols> AudioFrameEvent() => new("audio_frame_event", new AudioFrameEventCols("audio_frame_event"), new AudioFrameEventIxCols("audio_frame_event"));
+        public global::SpacetimeDB.Table<CallSession, CallSessionCols, CallSessionIxCols> CallSession() => new("call_session", new CallSessionCols("call_session"), new CallSessionIxCols("call_session"));
+        public global::SpacetimeDB.Table<ChatMessage, ChatMessageCols, ChatMessageIxCols> ChatMessage() => new("chat_message", new ChatMessageCols("chat_message"), new ChatMessageIxCols("chat_message"));
+        public global::SpacetimeDB.Table<MediaSettings, MediaSettingsCols, MediaSettingsIxCols> MediaSettings() => new("media_settings", new MediaSettingsCols("media_settings"), new MediaSettingsIxCols("media_settings"));
         public global::SpacetimeDB.Table<User, UserCols, UserIxCols> User() => new("user", new UserCols("user"), new UserIxCols("user"));
+        public global::SpacetimeDB.Table<VideoFrameEvent, VideoFrameEventCols, VideoFrameEventIxCols> VideoFrameEvent() => new("video_frame_event", new VideoFrameEventCols("video_frame_event"), new VideoFrameEventIxCols("video_frame_event"));
     }
 
     public sealed class TypedSubscriptionBuilder
@@ -616,8 +628,14 @@ namespace SpacetimeDB.Types
             var eventContext = (ReducerEventContext)context;
             return reducer switch
             {
+                Reducer.AcceptCall args => Reducers.InvokeAcceptCall(eventContext, args),
+                Reducer.DeclineCall args => Reducers.InvokeDeclineCall(eventContext, args),
+                Reducer.EndCall args => Reducers.InvokeEndCall(eventContext, args),
+                Reducer.RequestCall args => Reducers.InvokeRequestCall(eventContext, args),
+                Reducer.SendAudioFrame args => Reducers.InvokeSendAudioFrame(eventContext, args),
                 Reducer.SendMessage args => Reducers.InvokeSendMessage(eventContext, args),
-                Reducer.SetName args => Reducers.InvokeSetName(eventContext, args),
+                Reducer.SendVideoFrame args => Reducers.InvokeSendVideoFrame(eventContext, args),
+                Reducer.SetNickname args => Reducers.InvokeSetNickname(eventContext, args),
                 _ => throw new ArgumentOutOfRangeException("Reducer", $"Unknown reducer {reducer}")
             };
         }

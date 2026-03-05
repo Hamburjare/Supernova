@@ -15,24 +15,25 @@ namespace SpacetimeDB.Types
     {
         [DataMember(Name = "identity")]
         public SpacetimeDB.Identity Identity;
-        [DataMember(Name = "name")]
-        public string? Name;
-        [DataMember(Name = "online")]
-        public bool Online;
+        [DataMember(Name = "nickname")]
+        public string Nickname;
+        [DataMember(Name = "connected_at")]
+        public SpacetimeDB.Timestamp ConnectedAt;
 
         public User(
             SpacetimeDB.Identity Identity,
-            string? Name,
-            bool Online
+            string Nickname,
+            SpacetimeDB.Timestamp ConnectedAt
         )
         {
             this.Identity = Identity;
-            this.Name = Name;
-            this.Online = Online;
+            this.Nickname = Nickname;
+            this.ConnectedAt = ConnectedAt;
         }
 
         public User()
         {
+            this.Nickname = "";
         }
     }
 }
