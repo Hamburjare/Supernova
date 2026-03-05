@@ -16,12 +16,14 @@ public sealed class WindowsAudioService : IAudioService
 	private const int FrameSizeMs = 20;
 	private const int FrameSamples = SampleRate * FrameSizeMs / 1000;
 	private const int MaxOpusFrameSize = 4000;
-	private const int VadHoldFrames = 25; // Hold transmission for ~500ms after voice stops (25 frames * 20ms)
+	private const int VadHoldFrames = 35; // Hold transmission for ~700ms after voice stops (35 frames * 20ms)
+	private const int VadPlateauFrames = 10; // ~200ms at full volume before fade begins
 
 	private readonly AudioSettings _settings = new();
 	private readonly Dictionary<string, int> _userVolumes = new();
-	private readonly Dictionary<string, (WaveOutEvent player, BufferedWaveProvider buffer, IOpusDecoder decoder)> _userPlayback = new();
+	private readonly Dictionary<string, (WaveOutEvent player, BufferedWaveProvider buffer, IOpusDecoder decoder, VolumeWaveProvider16 volumeProvider)> _userPlayback = new();
 	private readonly object _lock = new();
+	private readonly object _captureLock = new();
 
 	private WasapiCapture? _capture;
 	private IOpusEncoder? _encoder;
@@ -32,12 +34,25 @@ public sealed class WindowsAudioService : IAudioService
 	private bool _isDisposed;
 	private string? _localUserId;
 
-	// Ring buffer for resampling/buffering captured audio
-	private readonly List<float> _captureBuffer = new();
+	// Reusable buffers for the audio hot path
+	private float[] _decodeBuffer = new float[FrameSamples * 2]; // max stereo
+	private byte[] _pcmByteBuffer = new byte[FrameSamples * 2 * 2]; // max stereo * 16-bit
+
+	// Ring buffer for resampling/buffering captured audio (accessed under _captureLock)
+	private float[] _captureRingBuffer = new float[FrameSamples * 16];
+	private int _captureRingCount;
 
 	// Fade in/out for smooth VAD transitions (prevents clicks/pops)
-	private const int FadeSamples = 240; // 5ms fade at 48kHz
+	private const int FadeSamples = 480; // 10ms fade at 48kHz
 	private bool _wasTransmitting;
+
+	// Reusable buffers for capture hot path (eliminates per-frame GC allocations)
+	private readonly float[] _frameBuffer = new float[FrameSamples];
+	private readonly byte[] _opusEncodeBuffer = new byte[MaxOpusFrameSize];
+
+	// Smoothed RMS for VAD to prevent gate flutter near threshold
+	private float _smoothedRms;
+	private const float RmsSmoothingAlpha = 0.3f;
 
 	public AudioSettings Settings => _settings;
 	public bool IsCapturing => _capture is not null;
@@ -55,11 +70,11 @@ public sealed class WindowsAudioService : IAudioService
 	public IReadOnlyList<AudioDevice> GetInputDevices()
 	{
 		var devices = new List<AudioDevice>();
-		var enumerator = new MMDeviceEnumerator();
+		using var enumerator = new MMDeviceEnumerator();
 
 		try
 		{
-			var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+			using var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
 			var defaultId = defaultDevice?.ID;
 
 			foreach (var device in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
@@ -71,6 +86,7 @@ public sealed class WindowsAudioService : IAudioService
 					IsDefault = device.ID == defaultId,
 					IsInput = true
 				});
+				device.Dispose();
 			}
 		}
 		catch
@@ -84,11 +100,11 @@ public sealed class WindowsAudioService : IAudioService
 	public IReadOnlyList<AudioDevice> GetOutputDevices()
 	{
 		var devices = new List<AudioDevice>();
-		var enumerator = new MMDeviceEnumerator();
+		using var enumerator = new MMDeviceEnumerator();
 
 		try
 		{
-			var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Communications);
+			using var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Communications);
 			var defaultId = defaultDevice?.ID;
 
 			foreach (var device in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
@@ -100,6 +116,7 @@ public sealed class WindowsAudioService : IAudioService
 					IsDefault = device.ID == defaultId,
 					IsInput = false
 				});
+				device.Dispose();
 			}
 		}
 		catch
@@ -119,7 +136,7 @@ public sealed class WindowsAudioService : IAudioService
 
 		try
 		{
-			var enumerator = new MMDeviceEnumerator();
+			using var enumerator = new MMDeviceEnumerator();
 			MMDevice? device;
 
 			if (!string.IsNullOrEmpty(_settings.InputDeviceId))
@@ -150,9 +167,13 @@ public sealed class WindowsAudioService : IAudioService
 			_capture.DataAvailable += OnDataAvailable;
 			_capture.RecordingStopped += OnRecordingStopped;
 
-			_captureBuffer.Clear();
+			lock (_captureLock)
+			{
+				_captureRingCount = 0;
+			}
 			_sequenceNumber = 0;
 			_wasTransmitting = false;
+			_smoothedRms = 0;
 			_capture.StartRecording();
 		}
 		catch
@@ -188,6 +209,11 @@ public sealed class WindowsAudioService : IAudioService
 		lock (_lock)
 		{
 			_userVolumes[userId] = volume;
+			// Update existing playback stream volume in real time
+			if (_userPlayback.TryGetValue(userId, out var playback))
+			{
+				playback.volumeProvider.Volume = volume / 100f * (_settings.OutputVolume / 100f);
+			}
 		}
 	}
 
@@ -241,7 +267,7 @@ public sealed class WindowsAudioService : IAudioService
 				player.Init(volumeProvider);
 				player.Play();
 
-				playback = (player, buffer, decoder);
+				playback = (player, buffer, decoder, volumeProvider);
 				_userPlayback[fromUserId] = playback;
 			}
 
@@ -253,21 +279,27 @@ public sealed class WindowsAudioService : IAudioService
 					playback.player.Play();
 				}
 
-				// Decode Opus to PCM (IOpusDecoder uses float samples)
-				var pcmFloat = new float[FrameSamples * frame.Channels];
-				var samplesDecoded = playback.decoder.Decode(frame.OpusData.AsSpan(), pcmFloat.AsSpan(), FrameSamples, false);
+				// Decode Opus to PCM using reusable buffers
+				var requiredFloats = FrameSamples * frame.Channels;
+				if (_decodeBuffer.Length < requiredFloats)
+					_decodeBuffer = new float[requiredFloats];
+
+				var samplesDecoded = playback.decoder.Decode(frame.OpusData.AsSpan(), _decodeBuffer.AsSpan(0, requiredFloats), FrameSamples, false);
 
 				if (samplesDecoded > 0)
 				{
-					// Convert float[] to byte[] for BufferedWaveProvider
-					var byteBuffer = new byte[samplesDecoded * frame.Channels * 2];
-					for (int i = 0; i < samplesDecoded * frame.Channels; i++)
+					var totalSamples = samplesDecoded * frame.Channels;
+					var requiredBytes = totalSamples * 2;
+					if (_pcmByteBuffer.Length < requiredBytes)
+						_pcmByteBuffer = new byte[requiredBytes];
+
+					for (int i = 0; i < totalSamples; i++)
 					{
-						short sample = (short)(Math.Clamp(pcmFloat[i], -1f, 1f) * short.MaxValue);
-						byteBuffer[i * 2] = (byte)(sample & 0xFF);
-						byteBuffer[i * 2 + 1] = (byte)(sample >> 8);
+						short sample = (short)(Math.Clamp(_decodeBuffer[i], -1f, 1f) * short.MaxValue);
+						_pcmByteBuffer[i * 2] = (byte)(sample & 0xFF);
+						_pcmByteBuffer[i * 2 + 1] = (byte)(sample >> 8);
 					}
-					playback.buffer.AddSamples(byteBuffer, 0, byteBuffer.Length);
+					playback.buffer.AddSamples(_pcmByteBuffer, 0, requiredBytes);
 				}
 			}
 			catch
@@ -297,21 +329,37 @@ public sealed class WindowsAudioService : IAudioService
 
 		// Resample to target rate if needed and add to buffer
 		var resampled = ResampleIfNeeded(samples, captureFormat.SampleRate, SampleRate, captureFormat.Channels);
-		_captureBuffer.AddRange(resampled);
+		lock (_captureLock)
+		{
+			EnsureRingCapacity(resampled.Length);
+			Array.Copy(resampled, 0, _captureRingBuffer, _captureRingCount, resampled.Length);
+			_captureRingCount += resampled.Length;
+		}
 
 		// Process complete frames
-		while (_captureBuffer.Count >= FrameSamples)
+		while (true)
 		{
-			var frameData = _captureBuffer.Take(FrameSamples).ToArray();
-			_captureBuffer.RemoveRange(0, FrameSamples);
+			lock (_captureLock)
+			{
+				if (_captureRingCount < FrameSamples)
+					break;
+				Array.Copy(_captureRingBuffer, 0, _frameBuffer, 0, FrameSamples);
+				_captureRingCount -= FrameSamples;
+				if (_captureRingCount > 0)
+					Array.Copy(_captureRingBuffer, FrameSamples, _captureRingBuffer, 0, _captureRingCount);
+			}
 
 			// Calculate RMS
-			float rms = CalculateRms(frameData);
+			float rms = CalculateRms(_frameBuffer);
 			_currentMicLevel = rms;
 			MicLevelChanged?.Invoke(this, rms);
 
-			// Voice activity detection with hysteresis
-			if (rms >= _settings.MicSensitivity)
+			// Smooth RMS with exponential moving average to prevent gate flutter
+			_smoothedRms += RmsSmoothingAlpha * (rms - _smoothedRms);
+
+			// Voice activity detection with hysteresis using smoothed RMS
+			bool isActivelyVoiced = _smoothedRms >= _settings.MicSensitivity;
+			if (isActivelyVoiced)
 			{
 				_isVoiceDetected = true;
 				_vadHoldCounter = VadHoldFrames;
@@ -319,7 +367,8 @@ public sealed class WindowsAudioService : IAudioService
 			else if (_vadHoldCounter > 0)
 			{
 				_vadHoldCounter--;
-				// Keep transmitting during hold period
+				if (_vadHoldCounter == 0)
+					_isVoiceDetected = false;
 			}
 			else
 			{
@@ -336,47 +385,53 @@ public sealed class WindowsAudioService : IAudioService
 			// If transitioning out, send one final fade-out frame
 			if (isTransitioningOut)
 			{
-				shouldTransmit = true; // Send one more frame with fade-out
+				shouldTransmit = true;
 			}
 
 			if (shouldTransmit)
 			{
-				// Apply fade envelope for smooth transitions
-				var fadedFrame = new float[FrameSamples];
-				Array.Copy(frameData, fadedFrame, FrameSamples);
-
+				// Fade-in on voice onset to prevent click
 				if (isTransitioningIn)
 				{
-					// Fade in: ramp up over FadeSamples
 					for (int i = 0; i < Math.Min(FadeSamples, FrameSamples); i++)
 					{
-						fadedFrame[i] *= (float)i / FadeSamples;
+						_frameBuffer[i] *= (float)i / FadeSamples;
 					}
 				}
 				else if (isTransitioningOut)
 				{
-					// Fade out: ramp down over FadeSamples
+					// Quick fade-out on final frame
 					int startFade = Math.Max(0, FrameSamples - FadeSamples);
 					for (int i = startFade; i < FrameSamples; i++)
 					{
-						fadedFrame[i] *= (float)(FrameSamples - i) / FadeSamples;
+						_frameBuffer[i] *= (float)(FrameSamples - i) / FadeSamples;
 					}
 				}
 
-				// Encode to Opus (IOpusEncoder uses float samples)
-				var pcmFloat = new float[FrameSamples];
-				for (int i = 0; i < FrameSamples; i++)
+				// Gradual fade during VAD hold period for smooth trail-off
+				// After the plateau period, progressively reduce volume to zero
+				int fadeZone = VadHoldFrames - VadPlateauFrames;
+				if (!isActivelyVoiced && _vadHoldCounter > 0 && _vadHoldCounter < fadeZone)
 				{
-					pcmFloat[i] = Math.Clamp(fadedFrame[i], -1f, 1f);
+					float holdFade = (float)_vadHoldCounter / fadeZone;
+					for (int i = 0; i < FrameSamples; i++)
+					{
+						_frameBuffer[i] *= holdFade;
+					}
 				}
 
-				var opusBuffer = new byte[MaxOpusFrameSize];
-				var encodedLength = _encoder.Encode(pcmFloat.AsSpan(), FrameSamples, opusBuffer.AsSpan(), MaxOpusFrameSize);
+				// Clamp in-place and encode to Opus
+				for (int i = 0; i < FrameSamples; i++)
+				{
+					_frameBuffer[i] = Math.Clamp(_frameBuffer[i], -1f, 1f);
+				}
+
+				var encodedLength = _encoder.Encode(_frameBuffer.AsSpan(), FrameSamples, _opusEncodeBuffer.AsSpan(), MaxOpusFrameSize);
 
 				if (encodedLength > 0)
 				{
 					var opusData = new byte[encodedLength];
-					Array.Copy(opusBuffer, opusData, encodedLength);
+					Array.Copy(_opusEncodeBuffer, opusData, encodedLength);
 
 					var frame = new AudioFrame
 					{
@@ -393,6 +448,17 @@ public sealed class WindowsAudioService : IAudioService
 
 			_wasTransmitting = shouldTransmit && !isTransitioningOut;
 		}
+	}
+
+	private void EnsureRingCapacity(int additionalSamples)
+	{
+		var required = _captureRingCount + additionalSamples;
+		if (required <= _captureRingBuffer.Length)
+			return;
+		var newSize = Math.Max(required, _captureRingBuffer.Length * 2);
+		var newBuffer = new float[newSize];
+		Array.Copy(_captureRingBuffer, 0, newBuffer, 0, _captureRingCount);
+		_captureRingBuffer = newBuffer;
 	}
 
 	private void OnRecordingStopped(object? sender, StoppedEventArgs e)
@@ -491,7 +557,7 @@ public sealed class WindowsAudioService : IAudioService
 
 		lock (_lock)
 		{
-			foreach (var (player, _, _) in _userPlayback.Values)
+			foreach (var (player, _, _, _) in _userPlayback.Values)
 			{
 				player.Stop();
 				player.Dispose();

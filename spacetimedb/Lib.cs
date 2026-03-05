@@ -68,6 +68,7 @@ public static partial class Module
         public string Name = "";
         public uint MaxMembers;
         public Timestamp CreatedAt;
+        public Identity CreatedBy;
     }
 
     /// <summary>
@@ -169,6 +170,10 @@ public static partial class Module
         {
             throw new Exception("Names must not be empty");
         }
+        if (name.Length > 100)
+        {
+            throw new Exception("Name must be 100 characters or less");
+        }
         return name;
     }
 
@@ -197,6 +202,10 @@ public static partial class Module
         if (string.IsNullOrEmpty(text))
         {
             throw new ArgumentException("Messages must not be empty");
+        }
+        if (text.Length > 4000)
+        {
+            throw new ArgumentException("Messages must be 4000 characters or less");
         }
         return text;
     }
@@ -238,7 +247,8 @@ public static partial class Module
             Id = 0, // Auto-increment
             Name = name.Trim(),
             MaxMembers = maxMembers,
-            CreatedAt = ctx.Timestamp
+            CreatedAt = ctx.Timestamp,
+            CreatedBy = ctx.Sender
         });
 
         Log.Info($"Voice channel '{name}' created by {ctx.Sender}");
@@ -255,6 +265,11 @@ public static partial class Module
         if (ctx.Db.VoiceChannel.Id.Find(channelId) is not VoiceChannel channel)
         {
             throw new Exception("Voice channel not found");
+        }
+
+        if (channel.CreatedBy != ctx.Sender)
+        {
+            throw new Exception("Only the channel creator can delete it");
         }
 
         // Remove all members from this channel
@@ -496,6 +511,17 @@ public static partial class Module
             return; // Drop oversized frames
         }
 
+        // Validate audio parameters
+        if (sampleRate is not (8000 or 12000 or 16000 or 24000 or 48000))
+        {
+            return; // Invalid sample rate for Opus
+        }
+
+        if (channels is not (1 or 2))
+        {
+            return; // Only mono or stereo
+        }
+
         // Insert into event table - broadcasts to all subscribers, then auto-deleted
         ctx.Db.AudioFrameEvent.Insert(new AudioFrameEvent
         {
@@ -524,7 +550,8 @@ public static partial class Module
                 Id = 0,
                 Name = "General",
                 MaxMembers = 25,
-                CreatedAt = ctx.Timestamp
+                CreatedAt = ctx.Timestamp,
+                CreatedBy = ctx.Identity
             });
             Log.Info("Created default 'General' voice channel");
         }

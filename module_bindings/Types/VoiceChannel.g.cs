@@ -21,18 +21,22 @@ namespace SpacetimeDB.Types
         public uint MaxMembers;
         [DataMember(Name = "created_at")]
         public SpacetimeDB.Timestamp CreatedAt;
+        [DataMember(Name = "created_by")]
+        public SpacetimeDB.Identity CreatedBy;
 
         public VoiceChannel(
             uint Id,
             string Name,
             uint MaxMembers,
-            SpacetimeDB.Timestamp CreatedAt
+            SpacetimeDB.Timestamp CreatedAt,
+            SpacetimeDB.Identity CreatedBy
         )
         {
             this.Id = Id;
             this.Name = Name;
             this.MaxMembers = MaxMembers;
             this.CreatedAt = CreatedAt;
+            this.CreatedBy = CreatedBy;
         }
 
         public VoiceChannel()

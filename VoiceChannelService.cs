@@ -13,6 +13,7 @@ public sealed class VoiceChannelService : IDisposable
 	private DbConnection? _conn;
 	private uint? _currentChannelId;
 	private bool _isDisposed;
+	private bool _isInitialized;
 
 	// Track members in the current channel
 	private readonly Dictionary<Identity, VoiceChannelMemberInfo> _channelMembers = new();
@@ -53,6 +54,12 @@ public sealed class VoiceChannelService : IDisposable
 	/// </summary>
 	public void Initialize(DbConnection conn, Identity localIdentity)
 	{
+		if (_isInitialized)
+		{
+			throw new InvalidOperationException("VoiceChannelService is already initialized. Dispose and create a new instance.");
+		}
+		_isInitialized = true;
+
 		_conn = conn;
 		_localIdentity = localIdentity;
 		_audioService.SetLocalUserId(localIdentity.ToString());
@@ -268,7 +275,6 @@ public sealed class VoiceChannelService : IDisposable
 
 	private void OnAudioFrameReceived(EventContext ctx, AudioFrameEvent frame)
 	{
-		// Don't process our own frames
 		if (_conn is null)
 		{
 			return;
@@ -370,6 +376,23 @@ public sealed class VoiceChannelService : IDisposable
 		}
 
 		_isDisposed = true;
+
+		// Unregister event handlers to prevent leaks
+		if (_conn is not null)
+		{
+			_conn.Db.VoiceChannelMember.OnInsert -= OnVoiceChannelMemberInserted;
+			_conn.Db.VoiceChannelMember.OnUpdate -= OnVoiceChannelMemberUpdated;
+			_conn.Db.VoiceChannelMember.OnDelete -= OnVoiceChannelMemberDeleted;
+			_conn.Db.AudioFrameEvent.OnInsert -= OnAudioFrameReceived;
+			_conn.Db.UserVolumeSettings.OnInsert -= OnUserVolumeSettingsChanged;
+			_conn.Db.UserVolumeSettings.OnUpdate -= OnUserVolumeSettingsUpdated;
+			_conn.Reducers.OnJoinVoiceChannel -= OnJoinVoiceChannelResult;
+			_conn.Reducers.OnLeaveVoiceChannel -= OnLeaveVoiceChannelResult;
+			_conn.Reducers.OnSetVoiceMuted -= OnSetVoiceMutedResult;
+			_conn.Reducers.OnSetVoiceDeafened -= OnSetVoiceDeafenedResult;
+			_conn = null;
+		}
+
 		_audioService.StopCapture();
 		_audioService.Dispose();
 	}

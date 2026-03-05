@@ -43,6 +43,7 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Col<VoiceChannel, string> Name { get; }
         public global::SpacetimeDB.Col<VoiceChannel, uint> MaxMembers { get; }
         public global::SpacetimeDB.Col<VoiceChannel, SpacetimeDB.Timestamp> CreatedAt { get; }
+        public global::SpacetimeDB.Col<VoiceChannel, SpacetimeDB.Identity> CreatedBy { get; }
 
         public VoiceChannelCols(string tableName)
         {
@@ -50,6 +51,7 @@ namespace SpacetimeDB.Types
             Name = new global::SpacetimeDB.Col<VoiceChannel, string>(tableName, "name");
             MaxMembers = new global::SpacetimeDB.Col<VoiceChannel, uint>(tableName, "max_members");
             CreatedAt = new global::SpacetimeDB.Col<VoiceChannel, SpacetimeDB.Timestamp>(tableName, "created_at");
+            CreatedBy = new global::SpacetimeDB.Col<VoiceChannel, SpacetimeDB.Identity>(tableName, "created_by");
         }
     }
 

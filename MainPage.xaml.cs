@@ -15,6 +15,7 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 	private const string DefaultDatabaseName = "supernova";
 	private const string DefaultAuth0Scope = "openid profile email";
 	private const string DefaultAuth0RedirectUri = "supernova://auth";
+	private const int MaxLogLines = 500;
 
 	private DbConnection? _conn;
 	private IDispatcherTimer? _frameTimer;
@@ -27,11 +28,11 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 	private readonly OidcAuthService _oidcAuthService = new();
 	private VoiceChannelService? _voiceService;
 	private Identity? _localIdentity;
+	private CancellationTokenSource? _speakingResetCts;
+	private CancellationTokenSource? _saveSettingsCts;
 
 	private readonly Dictionary<Identity, User> _usersByIdentity = new();
 	private readonly Dictionary<uint, VoiceChannelListItem> _voiceChannelsById = new();
-
-	public new event PropertyChangedEventHandler? PropertyChanged;
 
 	public ObservableCollection<UserListItem> Users { get; } = new();
 	public ObservableCollection<ChatMessageItem> Messages { get; } = new();
@@ -232,7 +233,20 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 		InitializeComponent();
 		BindingContext = this;
 
-		SetAuthenticationToken(Preferences.Get(OidcTokenPreferenceKey, string.Empty));
+		LoadStoredTokenAsync();
+	}
+
+	private async void LoadStoredTokenAsync()
+	{
+		try
+		{
+			var token = await SecureStorage.Default.GetAsync(OidcTokenPreferenceKey);
+			SetAuthenticationToken(token);
+		}
+		catch
+		{
+			SetAuthenticationToken(null);
+		}
 	}
 
 	protected override async void OnAppearing()
@@ -318,8 +332,6 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 		_conn.Db.VoiceChannelMember.OnInsert += OnVoiceChannelMemberInserted;
 		_conn.Db.VoiceChannelMember.OnUpdate += OnVoiceChannelMemberUpdated;
 		_conn.Db.VoiceChannelMember.OnDelete += OnVoiceChannelMemberDeleted;
-
-		StartFrameTimer();
 	}
 
 	private void OnVoiceChannelStateChanged(object? sender, bool isInChannel)
@@ -469,12 +481,7 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 		MainThread.BeginInvokeOnMainThread(() =>
 		{
 			StatusText = $"Connection error: {ex.Message}";
-			if (ex.Message.Contains("auth", StringComparison.OrdinalIgnoreCase)
-				|| ex.Message.Contains("token", StringComparison.OrdinalIgnoreCase)
-				|| ex.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase))
-			{
-				Disconnect();
-			}
+			Disconnect();
 		});
 	}
 
@@ -546,7 +553,7 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 				Users.Remove(existing);
 			}
 
-			RefreshMessageSenderNames();
+			RefreshMessageSenderNames(row.Identity);
 		});
 	}
 
@@ -644,17 +651,24 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 			{
 				member.IsSpeaking = args.Level > (_voiceService?.AudioService.Settings.MicSensitivity ?? 0.02f);
 
-				// Reset speaking after a delay
-				Task.Delay(200).ContinueWith(_ =>
-				{
-					MainThread.BeginInvokeOnMainThread(() =>
-					{
-						member.IsSpeaking = false;
-					});
-				});
+				// Cancel any previous reset and schedule a new one
+				_speakingResetCts?.Cancel();
+				_speakingResetCts = new CancellationTokenSource();
+				var token = _speakingResetCts.Token;
+				_ = ResetSpeakingAfterDelay(member, token);
 				break;
 			}
 		}
+	}
+
+	private static async Task ResetSpeakingAfterDelay(VoiceChannelMemberListItem member, CancellationToken token)
+	{
+		try
+		{
+			await Task.Delay(300, token);
+			MainThread.BeginInvokeOnMainThread(() => member.IsSpeaking = false);
+		}
+		catch (TaskCanceledException) { }
 	}
 
 	private void UpsertVoiceChannel(VoiceChannel channel)
@@ -876,6 +890,20 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 
 	private void SaveAudioSettingsToDb()
 	{
+		_saveSettingsCts?.Cancel();
+		_saveSettingsCts = new CancellationTokenSource();
+		var token = _saveSettingsCts.Token;
+		_ = SaveAudioSettingsDebounced(token);
+	}
+
+	private async Task SaveAudioSettingsDebounced(CancellationToken token)
+	{
+		try
+		{
+			await Task.Delay(300, token);
+		}
+		catch (TaskCanceledException) { return; }
+
 		if (_conn is null || _voiceService is null)
 		{
 			return;
@@ -938,36 +966,50 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 
 	private void UpsertUser(User user)
 	{
+		var oldName = _usersByIdentity.TryGetValue(user.Identity, out var prev) ? prev.Name : null;
 		_usersByIdentity[user.Identity] = user;
 
 		var displayName = ResolveDisplayName(user.Identity);
 		var existing = Users.FirstOrDefault(u => u.Identity == user.Identity);
 		if (existing is null)
 		{
-			Users.Add(new UserListItem(user.Identity, displayName, user.Online));
+			InsertUserSorted(new UserListItem(user.Identity, displayName, user.Online));
 		}
 		else
 		{
 			existing.DisplayName = displayName;
 			existing.Online = user.Online;
+			ResortUser(existing);
 		}
 
-		SortUsers();
-		RefreshMessageSenderNames();
+		// Only refresh message names if the user's name actually changed
+		if (!string.Equals(oldName, user.Name, StringComparison.Ordinal))
+		{
+			RefreshMessageSenderNames(user.Identity);
+		}
 	}
 
-	private void SortUsers()
+	private void InsertUserSorted(UserListItem item)
 	{
-		var sorted = Users
-			.OrderByDescending(x => x.Online)
-			.ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase)
-			.ToList();
-
-		Users.Clear();
-		foreach (var item in sorted)
+		var index = 0;
+		for (; index < Users.Count; index++)
 		{
-			Users.Add(item);
+			if (CompareUsers(item, Users[index]) < 0)
+				break;
 		}
+		Users.Insert(index, item);
+	}
+
+	private void ResortUser(UserListItem item)
+	{
+		Users.Remove(item);
+		InsertUserSorted(item);
+	}
+
+	private static int CompareUsers(UserListItem a, UserListItem b)
+	{
+		var onlineCmp = b.Online.CompareTo(a.Online); // online first
+		return onlineCmp != 0 ? onlineCmp : string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private void AddMessage(Message message)
@@ -979,10 +1021,12 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 			ToLocalDateTime(message.Sent)));
 	}
 
-	private void RefreshMessageSenderNames()
+	private void RefreshMessageSenderNames(Identity? changedIdentity = null)
 	{
 		foreach (var message in Messages)
 		{
+			if (changedIdentity.HasValue && message.SenderIdentity != changedIdentity.Value)
+				continue;
 			message.SenderName = ResolveDisplayName(message.SenderIdentity);
 		}
 	}
@@ -1100,7 +1144,7 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 	private void OnSignOutClicked(object? sender, EventArgs e)
 	{
 		Disconnect();
-		Preferences.Remove(OidcTokenPreferenceKey);
+		SecureStorage.Default.Remove(OidcTokenPreferenceKey);
 		SetAuthenticationToken(null);
 		StatusText = "Signed out";
 	}
@@ -1166,7 +1210,7 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 				throw new InvalidOperationException("OIDC provider did not return a JWT token usable by SpacetimeDB.");
 			}
 
-			Preferences.Set(OidcTokenPreferenceKey, jwt);
+			await SecureStorage.Default.SetAsync(OidcTokenPreferenceKey, jwt);
 			SetAuthenticationToken(jwt);
 			StatusText = "Sign in successful";
 			Connect(jwt);
@@ -1333,14 +1377,29 @@ public partial class MainPage : ContentPage, INotifyPropertyChanged
 		}
 
 		var line = $"[{DateTime.Now:HH:mm:ss}] {message}";
-		LogText = string.IsNullOrWhiteSpace(LogText)
-			? line
-			: $"{LogText}{Environment.NewLine}{line}";
+		if (string.IsNullOrWhiteSpace(LogText))
+		{
+			LogText = line;
+		}
+		else
+		{
+			var combined = $"{LogText}{Environment.NewLine}{line}";
+			// Cap the log to prevent unbounded memory growth
+			var lines = combined.Split(Environment.NewLine);
+			if (lines.Length > MaxLogLines)
+			{
+				LogText = string.Join(Environment.NewLine, lines[^MaxLogLines..]);
+			}
+			else
+			{
+				LogText = combined;
+			}
+		}
 	}
 
 	private void RaisePropertyChanged([CallerMemberName] string? propertyName = null)
 	{
-		PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+		OnPropertyChanged(propertyName);
 	}
 }
 
