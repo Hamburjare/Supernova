@@ -343,6 +343,7 @@ public class UserDisplay
 {
     public Identity Identity { get; }
     public string Nickname { get; }
+    public string Initial => string.IsNullOrEmpty(Nickname) ? "?" : Nickname[..1].ToUpperInvariant();
 
     public UserDisplay(Identity identity, string nickname)
     {
@@ -357,7 +358,9 @@ public class MessageDisplay
     public string Text { get; }
     public string Time { get; }
     public bool IsMe { get; }
-    public Color BubbleColor => IsMe ? Color.FromArgb("#512BD4") : Color.FromArgb("#404040");
+    public Color BubbleColor => IsMe ? Color.FromArgb("#fca311") : Color.FromArgb("#14213d");
+    public Color SenderColor => IsMe ? Color.FromArgb("#000000") : Color.FromArgb("#fca311");
+    public Color TextColor => IsMe ? Color.FromArgb("#000000") : Color.FromArgb("#ffffff");
     public LayoutOptions HorizontalAlign => IsMe ? LayoutOptions.End : LayoutOptions.Start;
 
     public MessageDisplay(string sender, string text, Timestamp sentAt, bool isMe)

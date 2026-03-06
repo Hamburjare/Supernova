@@ -5,103 +5,142 @@
              x:Class="Supernova.MainPage"
              x:Name="ThisPage"
              x:DataType="vm:MainViewModel"
-             BackgroundColor="#1a1a2e">
+             BackgroundColor="#000000">
 
     <Grid RowDefinitions="Auto,*,Auto">
 
-        <!-- ═══ TOP BAR: connection status + nickname ═══ -->
-        <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto,Auto" Padding="12,8" BackgroundColor="#16213e">
-            <HorizontalStackLayout Spacing="8" VerticalOptions="Center">
-                <Ellipse WidthRequest="10" HeightRequest="10"
-                         Fill="{Binding ConnectionColor}"
-                         VerticalOptions="Center"/>
-                <Label Text="{Binding ConnectionStatus}"
-                       TextColor="#a0a0a0" FontSize="12"
-                       VerticalOptions="Center"/>
-            </HorizontalStackLayout>
+        <!-- ═══ TOP BAR ═══ -->
+        <Border Grid.Row="0" BackgroundColor="#14213d"
+                StrokeThickness="0"
+                Padding="16,10">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12">
+                <!-- Connection indicator -->
+                <HorizontalStackLayout Spacing="8" VerticalOptions="Center">
+                    <Ellipse WidthRequest="8" HeightRequest="8"
+                             Fill="{Binding ConnectionColor}"
+                             VerticalOptions="Center"/>
+                    <Label Text="{Binding ConnectionStatus}"
+                           TextColor="#e5e5e5" FontSize="11"
+                           VerticalOptions="Center"/>
+                </HorizontalStackLayout>
 
-            <Label Grid.Column="1"
-                   Text="{Binding Nickname, StringFormat='You: {0}'}"
-                   TextColor="White" FontSize="14" FontAttributes="Bold"
-                   VerticalOptions="Center" HorizontalOptions="Center"/>
+                <!-- Current nickname -->
+                <Label Grid.Column="1"
+                       Text="{Binding Nickname, StringFormat='You: {0}'}"
+                       TextColor="#ffffff" FontSize="14" FontAttributes="Bold"
+                       VerticalOptions="Center" HorizontalOptions="Center"/>
 
-            <Entry Grid.Column="2"
-                   Text="{Binding NicknameEntry}"
-                   Placeholder="New name..."
-                   PlaceholderColor="#707070"
-                   TextColor="White" BackgroundColor="#0f3460"
-                   WidthRequest="160" VerticalOptions="Center"
-                   ReturnCommand="{Binding ChangeNameCommand}"
-                   Margin="0,0,4,0"/>
-            <Button Grid.Column="3" Text="Rename"
-                    Command="{Binding ChangeNameCommand}"
-                    BackgroundColor="#533483" TextColor="White"
-                    FontSize="12" Padding="12,6"
-                    VerticalOptions="Center"/>
-        </Grid>
+                <!-- Rename entry -->
+                <Border Grid.Column="2" BackgroundColor="#1b2d52"
+                        StrokeShape="RoundRectangle 8"
+                        Stroke="#fca311" StrokeThickness="1"
+                        Padding="0" VerticalOptions="Center">
+                    <Entry Text="{Binding NicknameEntry}"
+                           Placeholder="New name..."
+                           PlaceholderColor="#6E6E6E"
+                           TextColor="#ffffff" BackgroundColor="Transparent"
+                           WidthRequest="150" HeightRequest="36"
+                           FontSize="13" Margin="8,0"
+                           ReturnCommand="{Binding ChangeNameCommand}"/>
+                </Border>
+
+                <Button Grid.Column="3" Text="Rename"
+                        Command="{Binding ChangeNameCommand}"
+                        BackgroundColor="#fca311" TextColor="#000000"
+                        FontSize="12" FontAttributes="Bold"
+                        CornerRadius="8" Padding="14,8"
+                        VerticalOptions="Center"/>
+            </Grid>
+        </Border>
 
         <!-- ═══ MAIN: users sidebar + chat ═══ -->
-        <Grid Grid.Row="1" ColumnDefinitions="220,*">
+        <Grid Grid.Row="1" ColumnDefinitions="240,*" ColumnSpacing="0">
 
             <!-- ── Users sidebar ── -->
-            <Grid Grid.Column="0" RowDefinitions="Auto,*" BackgroundColor="#16213e">
-                <Label Grid.Row="0" Text="Online Users"
-                       FontAttributes="Bold" FontSize="16" TextColor="White"
-                       Padding="12,10"/>
-                <CollectionView Grid.Row="1" ItemsSource="{Binding Users}">
-                    <CollectionView.ItemTemplate>
-                        <DataTemplate x:DataType="vm:UserDisplay">
-                            <Grid ColumnDefinitions="*,Auto,Auto" Padding="12,6" HeightRequest="44">
-                                <Label Text="{Binding Nickname}" TextColor="White"
-                                       FontSize="14" VerticalOptions="Center"
-                                       LineBreakMode="TailTruncation"/>
-                                <Button Grid.Column="1" Text="&#x1F4DE;" FontSize="16"
-                                        BackgroundColor="Transparent"
-                                        Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.VoiceCallCommand}"
-                                        CommandParameter="{Binding .}"
-                                        Padding="4" WidthRequest="36" HeightRequest="36"/>
-                                <Button Grid.Column="2" Text="&#x1F4F9;" FontSize="16"
-                                        BackgroundColor="Transparent"
-                                        Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.VideoCallCommand}"
-                                        CommandParameter="{Binding .}"
-                                        Padding="4" WidthRequest="36" HeightRequest="36"/>
-                            </Grid>
-                        </DataTemplate>
-                    </CollectionView.ItemTemplate>
-                    <CollectionView.EmptyView>
-                        <Label Text="No other users online"
-                               TextColor="#707070"
-                               HorizontalOptions="Center" Margin="0,20,0,0" FontSize="13"/>
-                    </CollectionView.EmptyView>
-                </CollectionView>
-            </Grid>
+            <Border Grid.Column="0" BackgroundColor="#14213d"
+                    StrokeThickness="0">
+                <Grid RowDefinitions="Auto,*">
+                    <!-- Sidebar header -->
+                    <Border Grid.Row="0" BackgroundColor="#0d1629"
+                            StrokeThickness="0" Padding="16,12">
+                        <Label Text="Online Users"
+                               FontAttributes="Bold" FontSize="15" TextColor="#fca311"/>
+                    </Border>
+
+                    <!-- User list -->
+                    <CollectionView Grid.Row="1" ItemsSource="{Binding Users}">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:UserDisplay">
+                                <Border BackgroundColor="Transparent"
+                                        StrokeThickness="0" Padding="12,8">
+                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+                                        <!-- User avatar circle -->
+                                        <Border WidthRequest="32" HeightRequest="32"
+                                                BackgroundColor="#1b2d52"
+                                                StrokeShape="RoundRectangle 16"
+                                                Stroke="#fca311" StrokeThickness="1.5"
+                                                VerticalOptions="Center">
+                                            <Label Text="{Binding Initial}"
+                                                   TextColor="#fca311" FontSize="13" FontAttributes="Bold"
+                                                   HorizontalOptions="Center" VerticalOptions="Center"/>
+                                        </Border>
+
+                                        <Label Grid.Column="1" Text="{Binding Nickname}" TextColor="#ffffff"
+                                               FontSize="13" VerticalOptions="Center"
+                                               LineBreakMode="TailTruncation"/>
+
+                                        <Button Grid.Column="2" Text="&#x1F4DE;" FontSize="14"
+                                                BackgroundColor="Transparent"
+                                                Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.VoiceCallCommand}"
+                                                CommandParameter="{Binding .}"
+                                                Padding="2" WidthRequest="32" HeightRequest="32"
+                                                VerticalOptions="Center"/>
+                                        <Button Grid.Column="3" Text="&#x1F4F9;" FontSize="14"
+                                                BackgroundColor="Transparent"
+                                                Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.VideoCallCommand}"
+                                                CommandParameter="{Binding .}"
+                                                Padding="2" WidthRequest="32" HeightRequest="32"
+                                                VerticalOptions="Center"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                        <CollectionView.EmptyView>
+                            <Label Text="No other users online"
+                                   TextColor="#6E6E6E" FontSize="12"
+                                   HorizontalOptions="Center" Margin="0,20,0,0"/>
+                        </CollectionView.EmptyView>
+                    </CollectionView>
+                </Grid>
+            </Border>
 
             <!-- ── Chat area ── -->
-            <Grid Grid.Column="1" RowDefinitions="*,Auto" BackgroundColor="#1a1a2e">
+            <Grid Grid.Column="1" RowDefinitions="*,Auto" BackgroundColor="#000000">
 
+                <!-- Messages -->
                 <CollectionView x:Name="ChatList" Grid.Row="0"
                                 ItemsSource="{Binding Messages}"
-                                Margin="8,4"
+                                Margin="12,8"
                                 ItemsUpdatingScrollMode="KeepLastItemInView">
                     <CollectionView.ItemTemplate>
                         <DataTemplate x:DataType="vm:MessageDisplay">
-                            <Grid Padding="4,2">
+                            <Grid Padding="4,3">
                                 <Border BackgroundColor="{Binding BubbleColor}"
-                                       StrokeShape="RoundRectangle 12"
-                                       Padding="12,8"
+                                       StrokeShape="RoundRectangle 14"
+                                       Padding="14,10"
                                        HorizontalOptions="{Binding HorizontalAlign}"
-                                       MaximumWidthRequest="500"
+                                       MaximumWidthRequest="520"
                                        Stroke="Transparent">
-                                    <VerticalStackLayout Spacing="2">
-                                        <HorizontalStackLayout Spacing="8">
+                                    <VerticalStackLayout Spacing="3">
+                                        <HorizontalStackLayout Spacing="10">
                                             <Label Text="{Binding Sender}"
-                                                   TextColor="#b0b0ff" FontSize="11"
+                                                   TextColor="{Binding SenderColor}" FontSize="11"
                                                    FontAttributes="Bold"/>
                                             <Label Text="{Binding Time}"
-                                                   TextColor="#808080" FontSize="10"/>
+                                                   TextColor="#6E6E6E" FontSize="10"/>
                                         </HorizontalStackLayout>
                                         <Label Text="{Binding Text}"
-                                               TextColor="White" FontSize="14"/>
+                                               TextColor="{Binding TextColor}" FontSize="14"/>
                                     </VerticalStackLayout>
                                 </Border>
                             </Grid>
@@ -109,53 +148,61 @@
                     </CollectionView.ItemTemplate>
                 </CollectionView>
 
-                <!-- Message input -->
-                <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Padding="8" BackgroundColor="#16213e">
-                    <Entry Text="{Binding MessageText}"
-                           Placeholder="Type a message..."
-                           PlaceholderColor="#707070"
-                           TextColor="White" BackgroundColor="#0f3460"
-                           FontSize="14" Margin="0,0,8,0"
-                           ReturnCommand="{Binding SendMessageCommand}"/>
-                    <Button Grid.Column="1" Text="Send"
-                            Command="{Binding SendMessageCommand}"
-                            BackgroundColor="#533483" TextColor="White"
-                            FontSize="14" Padding="16,8"/>
-                </Grid>
+                <!-- Message input bar -->
+                <Border Grid.Row="1" BackgroundColor="#14213d"
+                        StrokeThickness="0" Padding="12,10">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                        <Border BackgroundColor="#1b2d52"
+                                StrokeShape="RoundRectangle 10"
+                                Stroke="#1b2d52" StrokeThickness="1"
+                                Padding="0">
+                            <Entry Text="{Binding MessageText}"
+                                   Placeholder="Type a message..."
+                                   PlaceholderColor="#6E6E6E"
+                                   TextColor="#ffffff" BackgroundColor="Transparent"
+                                   FontSize="14" Margin="12,0"
+                                   ReturnCommand="{Binding SendMessageCommand}"/>
+                        </Border>
+                        <Button Grid.Column="1" Text="Send"
+                                Command="{Binding SendMessageCommand}"
+                                BackgroundColor="#fca311" TextColor="#000000"
+                                FontSize="14" FontAttributes="Bold"
+                                CornerRadius="10" Padding="20,10"/>
+                    </Grid>
+                </Border>
             </Grid>
         </Grid>
 
-        <!-- ═══ CALL PANEL (bottom bar) ═══ -->
+        <!-- ═══ CALL PANEL ═══ -->
         <Border Grid.Row="2" IsVisible="{Binding IsInCall}"
-                BackgroundColor="#0f3460" Padding="12"
-                Stroke="#533483" StrokeThickness="1">
-            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto">
+                BackgroundColor="#14213d" Padding="16,12"
+                StrokeShape="RoundRectangle 0"
+                Stroke="#fca311" StrokeThickness="1.5">
+            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="10">
                 <Label Grid.Row="0" Grid.ColumnSpan="2"
-                       Text="{Binding CallStatusText}" TextColor="White"
-                       FontSize="16" FontAttributes="Bold"/>
+                       Text="{Binding CallStatusText}" TextColor="#ffffff"
+                       FontSize="15" FontAttributes="Bold"/>
 
-                <!-- Call action buttons -->
-                <HorizontalStackLayout Grid.Row="1" Grid.Column="1" Spacing="8" Margin="0,8,0,0">
-                    <Button Text="Accept" BackgroundColor="#2ecc71" TextColor="White"
+                <HorizontalStackLayout Grid.Row="1" Grid.Column="1" Spacing="10">
+                    <Button Text="Accept" BackgroundColor="#2ecc71" TextColor="#ffffff"
                             IsVisible="{Binding IsIncomingCall}"
                             Command="{Binding AcceptCallCommand}"
-                            Padding="16,8"/>
-                    <Button Text="Decline" BackgroundColor="#e74c3c" TextColor="White"
+                            CornerRadius="8" Padding="18,10" FontAttributes="Bold"/>
+                    <Button Text="Decline" BackgroundColor="#e74c3c" TextColor="#ffffff"
                             IsVisible="{Binding IsIncomingCall}"
                             Command="{Binding DeclineCallCommand}"
-                            Padding="16,8"/>
-                    <Button Text="End Call" BackgroundColor="#e74c3c" TextColor="White"
+                            CornerRadius="8" Padding="18,10" FontAttributes="Bold"/>
+                    <Button Text="End Call" BackgroundColor="#e74c3c" TextColor="#ffffff"
                             Command="{Binding EndCallCommand}"
-                            Padding="16,8"/>
+                            CornerRadius="8" Padding="18,10" FontAttributes="Bold"/>
                 </HorizontalStackLayout>
 
-                <!-- Remote video preview -->
                 <Image Grid.Row="1" Grid.Column="0"
                        Source="{Binding RemoteVideoFrame}"
                        IsVisible="{Binding IsVideoCall}"
                        HeightRequest="180" WidthRequest="320"
                        Aspect="AspectFit"
-                       HorizontalOptions="Start" Margin="0,8,0,0"/>
+                       HorizontalOptions="Start"/>
             </Grid>
         </Border>
     </Grid>
